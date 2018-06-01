@@ -5,7 +5,6 @@ import sys
 import time
 import argparse
 import re
-import socket
 import subprocess
 import nmap
 import docker
@@ -15,8 +14,13 @@ import getpass
 import json
 import logging
 import coloredlogs
+import socket
+from netaddr import valid_ipv4, valid_ipv6, IPNetwork
 from urllib.parse import urlparse
-from ipaddress import ip_interface
+
+
+logger = logging.getLogger(__name__)
+coloredlogs.install(level='DEBUG', logger=logger)
 
 
 # Various helper functions are defined first
@@ -38,32 +42,35 @@ def is_valid_hostname(hostname):
 
 
 def is_valid_ipv4(ip_str):
-    """Check the validity of an IPv4 address"""
-    try:
-        socket.inet_pton(socket.AF_INET, ip_str)
-    except AttributeError:
+    if ('/' in ip_str):
+        # The entered IP is CIDR notation
         try:
-            socket.inet_aton(ip_str)
-        except socket.error:
+            IPNetwork(ip_str)
+            return True
+        except:
+            logger.error("Incorrect IP in CIDR notation.")
             return False
-        return ip_str.count('.') == 3
-    except socket.error:
-        return False
-    return True
+    else:
+        return valid_ipv4(ip_str)
 
 
 def is_valid_ipv6(ip_str):
-    """Check the validity of an IPv6 address"""
-    try:
-        socket.inet_pton(socket.AF_INET6, ip_str)
-    except socket.error:
-        return False
-    return True
+    return valid_ipv6(ip_str)
 
 
-def is_valid_ip(ip_str):
+def is_valid_ip(ip_notation):
     """Check the validity of an IP address"""
-    return is_valid_ipv4(ip_str) or is_valid_ipv6(ip_str)
+    if (is_valid_ipv4(ip_notation) or is_valid_ipv6(ip_notation)):
+        if ('/' in ip_notation):
+            # The entered IP is CIDR notation
+            # let's convert it into a string of sequential IPs
+            for ip in ip_notation:
+                expanded_ip = ip + " "
+            return expanded_ip      # A string containing IP addresses separated by a space
+        else:
+            return ip_notation      # just a single IP address
+    else:
+        return False
 
 
 def is_nmap_installed():
@@ -156,50 +163,51 @@ def validate_target(target):
         # Is the domain/hostname in the URL valid?
         if (is_valid_hostname(urlparse(url).netloc)):
             verified_url_target = url
-            return verified_url_target
+            target_type = 'URL'
+            return verified_url_target, target_type
+
+    elif (is_valid_ip(target)):
+        target_type = 'IP'
+        return target, target_type
 
     # The target is not a URL, it's either a hostname...
     elif (is_valid_hostname(target)):
-        return target
+        target_type = 'DOMAIN'
+        return target, target_type
 
     # ... or an IP address or subnet mask notation
-    elif (is_valid_ip(target)):
-        ip_list = []
-        ipaddr = ip_interface(target)
-        ip = ipaddr.ip
-        for ip in ipaddr.network:
-            ip_list.append(ip)                   # This needs to be a list
-        return ip_list                           # This also needs to be a list
-
-    else:
-        return False
+    # else:
+    #    target_type = 'IP'
+    #    return (is_valid_ip(target), target_type)
 
 
 def perform_nmap_tcp_scan(target, tool_arguments):
     # Check to see if nmap is installed
+    logger.info("[+] Attempting to run Nmap TCP scan...")
 
     if (is_nmap_installed()):
         # Currently the nmap TCP scan parameters are known. Therefore will hardcode them here.
         # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
-        if isinstance(target, (list,)):
-            # This means target is an IP address, in a list with either 1 or more IPs
-            if len(target) == 1:
-                ip_target = target[0]._ip.__str__()
-            else:
-                for ip in target:
-                    ip_target += ip + " "
+        # Get target's resolved IP using system DNS
+        target_ip = socket.gethostbyname(target)
+        print(target_ip)
 
         nm = nmap.PortScanner()
-        nmap_arguments = '-v -Pn -sT --top-ports 1000 --open -T4 '
+        nmap_arguments = '-v -Pn -sT -A --top-ports 1000 --open -T4 --system-dns'
         if (tool_arguments['force_dns_lookup']):
-            nmap_arguments += " -n"
-        results = nm.scan(ip_target, arguments=nmap_arguments, sudo=False)
-        print(nm.get_nmap_last_output())
-        return results
+            nmap_arguments += " -R"
+        
+        results = nm.scan(target, arguments=nmap_arguments, sudo=False)
+        if (target_ip == "".join(nm.all_hosts())):
+            # Make this write to file before return
+            print(results)
+            return nm
+        else:
+            logger.error("Nmap TCP scan error!")
+            return False
 
-        # Add logic here to check for SSH, if open we need to create a new task to scan SSH with ssh_scan
     else:
         print("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
@@ -207,54 +215,63 @@ def perform_nmap_tcp_scan(target, tool_arguments):
 
 def perform_nmap_udp_scan(target, tool_arguments):
     # Check to see if nmap is installed
+    logger.info("[+] Attempting to run Nmap UDP scan...")
+    logger.warning("[!] Note: UDP scan requires sudo. You will be prompted for your local account password.")
 
     if (is_nmap_installed()):
         # Currently the nmap UDP scan ports are known. Therefore will hard code them here.
         # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
-        if isinstance(target, (list,)):
-            # This means target is an IP address, in a list with either 1 or more IPs
-            if len(target) == 1:
-                ip_target = target[0]
-            else:
-                for ip in target:
-                    ip_target += ip + " "
+        # Get target's resolved IP using system DNS
+        target_ip = socket.gethostbyname(target)
+        print(target_ip)
 
         udp_ports = "17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960"
 
         nm = nmap.PortScanner()
-        nmap_arguments = '-v -Pn -sU -sV --open -T4 -oX ' + target + '__scan_udp.xml'
+        nmap_arguments = '-v -Pn -sU -sV --open -T4 --system-dns'
         if (tool_arguments['force_dns_lookup']):
-            nmap_arguments += " -n"
+            nmap_arguments += " -R"
 
         # nmap UDP scan requires sudo, setting it to true
         # Assume this will prompt the user to enter their password?
-        return nm.scan(target, ports=udp_ports, arguments=nmap_arguments, sudo=True)
+        results = nm.scan(target, ports=udp_ports, arguments=nmap_arguments, sudo=True)
+        if (target_ip == "".join(nm.all_hosts())):
+            # Make this write to file before return
+            print(results)
+            return nm
+        else:
+            logger.error("Nmap UDP scan error!")
+            return False
 
     else:
         print("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
 
 
-def perform_sshscan_scan(target):
+def perform_sshscan_scan(target, ssh_port=22):
     """Since we are already utilising Docker for other tasks,
     will use Docker here as well
     """
+    logger.info("[+] Attempting to run ssh_scan as an SSH service was identified on target...")
+    sshport = ssh_port.__str__()
 
     if (is_docker_installed()):
         docker_client = docker.from_env()
-        docker_client.images.pull('mozilla/sshscan')
+        docker_client.images.pull('mozilla/ssh_scan')
+        docker_client.containers.run('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -o /tmp/' + target + '__sshscan.json -t ' + target)
+        # Copy the resulting file back to local system, same directory
+        container_name = docker_client.containers.list(filters={'ancestor': 'mozilla/ssh_scan'}, limit=1)[0].name
         # Potential OS command injection venue here?
-        docker_client.containers.run('mozilla/sshscan', '/app/bin/ssh_scan -o /tmp/' + target + '__sshscan.json -t ' + target)
-        # Copy the resulting file back to local system
-        p = subprocess.Popen('docker cp mozilla/sshscan:/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None)
+        p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None, shell=True)
+        container_name.stop()
         return True
 
     # Here only testing if it may have been installed as a Ruby gem
     elif (is_sshscan_installed()):
-        cmd = "ssh_scan -o " + target + "__sshscan.json -t " + target
-        sanitised_cmd = shlex.quote(cmd)
+        cmd = "ssh_scan -p " + sshport + " -o " + target + "__sshscan.json -t " + target
+        sanitised_cmd = sanitise_shell_command(cmd)
         # TODO: Is there a way to run this without shell=True ?
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
@@ -270,6 +287,8 @@ def perform_sshscan_scan(target):
 
 def perform_nessus_scan(target, tool_arguments):
 
+    # logger.info("[+] Attempting to run a Nessus scan...")
+
     print("Nessus scan is not yet supported. Skipping.")
     return False
 
@@ -278,9 +297,11 @@ def perform_nessus_scan(target, tool_arguments):
 # If it is, use that. If not, I will use a provided script (in the package) to run it.
 def perform_httpobs_scan(target):
 
+    logger.info("[+] Attempting to run HTTP Observatory scan...")
+
     if (is_observatory_installed()):
         cmd = "observatory --format json -z -q --rescan " + target + " > " + target + "__httpobs_scan.json"
-        sanitised_cmd = shlex.quote(cmd)
+        sanitised_cmd = sanitise_shell_command(cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
@@ -294,7 +315,7 @@ def perform_httpobs_scan(target):
     # we will use a script provided instead (httpobs-local-scan)
     elif (importlib.util.find_spec("httpobs.scanner.local")):
         script = "httpobs-local-scan --format json " + target + " > " + target + "__httpobs_scan.json"
-        sanitised_script = shlex.quote(script)
+        sanitised_script = sanitise_shell_command(script)
         p = subprocess.Popen(sanitised_script, shell=True)
         p.wait()
 
@@ -309,9 +330,11 @@ def perform_httpobs_scan(target):
 
 def perform_tlsobs_scan(target):
 
+    logger.info("[+] Attempting to run TLS Observatory scan...")
+
     if (is_TLSobservatory_installed()):
         cmd = "tlsobs -r " + target + " > " + target + "__tlsobs_scan.json"
-        sanitised_cmd = shlex.quote(cmd)
+        sanitised_cmd = sanitise_shell_command(cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
@@ -340,9 +363,12 @@ def perform_dirb_scan(target):
     # This will require some proper multi-threading.
     # For now, let's run this as the last task.
 
+    logger.info("[+] Attempting to run directory brute-forcing on the target URL...")
+    logger.info("[+] This may take a while, go get a coffee or something.")
+
     if (is_dirb_installed()):
         cmd = "dirb " + target + " -f -w -r -S -o " + target + "__dirb_scan.txt"
-        sanitised_cmd = shlex.quote(cmd)
+        sanitised_cmd = sanitise_shell_command(cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
@@ -356,6 +382,8 @@ def perform_dirb_scan(target):
 
 
 def perform_zap_scan(target, tool_arguments):
+
+    logger.info("[+] Attempting to run ZAP scan on the target URL...")
 
     if (is_docker_installed()):
         docker_client = docker.from_env()
@@ -377,12 +405,13 @@ def perform_zap_scan(target, tool_arguments):
         return False
 
 
+def sanitise_shell_command(command):
+    return shlex.quote(command)
+
+
 def main():
 
     global args
-
-    logger = logging.getLogger(__name__)
-    coloredlogs.install(level='DEBUG', logger=logger)
 
     """
     safe_scan = False
@@ -408,20 +437,20 @@ def main():
                         help='Compress all tool outputs into a single file')
     parser.add_argument('-v', '--verbose', action='store_true', help='display'\
     ' progress indicator')
-    parser.add_argument('-n', action='store_true', help='Force perform'\
+    parser.add_argument('-r', action='store_true', help='Force perform'\
     ' a DNS lookup')
     # parser.add_argument('-h', help='Display this help text')
 
     args = parser.parse_args()
 
     # Target validation
-    # Try to parse the hostname, in case a URL is given
-
     target_OK = validate_target(args.target)
+    # Target_OK here is a tuple now
+    # First index is either a boolean False, or a string of IP address(es), or a hostname or a URL
+    print(target_OK)
 
-    if (target_OK):
-        # At this stage, we have a valid hostname or IP address(es) here to work with
-        # target_OK is either a boolean, or a list of host(s)
+    if (target_OK[0]):
+        # If target_OK is a tuple whose first element is not False, we can start running the tasks
 
         """At a minimum, the following tasks are required for a VA:
            1. TCP port scan
@@ -443,34 +472,69 @@ def main():
         if args.verbose:
             args_dict['verbose_output'] = True
 
-        if args.n:
+        if args.r:
             args_dict['force_dns_lookup'] = True
 
         # Let's start running the tasks...
 
+        ssh_found = False
+
         for task in tasklist:
             if 'tcp' in task:
-                # Run nmap TCP scan
-                nmap_tcp_results = perform_nmap_tcp_scan(target_OK, args_dict)
-                if (nmap_tcp_results):
-                    # if ssh is exposed, run SSH scan...
-                    # Fix this, target_OK here is a list which may or may not contain multiple IPs (at least 1 IP)
-                    if nmap_tcp_results[target_OK[0]._ip.__str__()].has_tcp(22) or ('ssh' in (nmap_tcp_results[target_OK[0]._ip.__str__()].name or nmap_tcp_results[target_OK[0]._ip.__str__()].product)):
-                        # Need to find the actual SSH port, in case it's not 22
-                        for proto in nmap_tcp_results[target_OK].all_protocols():
-                            lport = nmap_tcp_results[target_OK][proto].keys()
-                            for port in lport:
-                                if port == 22:
-                                    ssh_port = port
-                                else:
-                                    banner = nmap_tcp_results[target_OK][proto][port]['product']
-                                    if ('SSH' or 'ssh') in banner:
-                                        ssh_port = port
-                        tasklist.append('ssh_scan-scan')
-                        perform_sshscan_scan(target_OK, ssh_port)
+                if (target_OK[1] != 'URL'):
+                    # Run nmap TCP scan
+                    nmap_tcp_results = perform_nmap_tcp_scan(target_OK[0], args_dict)
+                
+                    if (nmap_tcp_results):
+                        # if ssh is exposed, run SSH scan...
+                        
+                        if (target_OK[1] == 'DOMAIN'):
+                            # Get target's resolved IP using system DNS
+                            target_ip = socket.gethostbyname(target_OK[0])
+                            if nmap_tcp_results[target_ip].has_tcp(22):
+                                ssh_found = True
+                                perform_sshscan_scan(target_ip, 22)
+                            else:
+                                # or ('ssh' in (nmap_tcp_results[target_ip].name or nmap_tcp_results[target_ip].product)):
+                                # Need to find the actual SSH port, in case it's not 22
+                                for proto in nmap_tcp_results[target_ip].all_protocols():
+                                    lport = nmap_tcp_results[target_ip][proto].keys()
+                                    for port in lport:
+                                        banner = nmap_tcp_results[target_ip][proto][port]['product'] + "|" + nmap_tcp_results[target_ip][proto][port]['name']
+                                        if ('SSH' or 'ssh') in banner:
+                                            ssh_found = True
+                                            ssh_port = port
+                                            perform_sshscan_scan(target_ip, ssh_port)
+                            if (not ssh_found):
+                                logger.info("SSH service not identified on \"" + target_OK[0] + "\", skipping SSH scan.")
+
+                        else:   # Means we have IP address(es)
+                            if (target_OK[0].count(' ') >= 0):
+                                # We have more than 1 IP, need a loop
+                                ip_list = target_OK[0].split(' ') 
+                                for ip in ip_list:
+                                    if nmap_tcp_results[ip].has_tcp(22):
+                                        ssh_found = True
+                                        perform_sshscan_scan(ip, 22)
+                                    else:
+                                        # or ('ssh' in (nmap_tcp_results[ip].name or nmap_tcp_results[ip].product)):
+                                        # Need to find the actual SSH port, in case it's not 22
+                                        for proto in nmap_tcp_results[ip].all_protocols():
+                                            lport = nmap_tcp_results[ip][proto].keys()
+                                            for port in lport:
+                                                banner = nmap_tcp_results[ip][proto][port]['product'] + "|" + nmap_tcp_results[ip][proto][port]['name']
+                                                if ('SSH' or 'ssh') in banner:
+                                                    ssh_found = True
+                                                    ssh_port = port
+                                                    perform_sshscan_scan(ip, ssh_port)
+                                    if (not ssh_found):
+                                        logger.info("SSH service not identified on \"" + ip + "\", skipping SSH scan.")
+                    else:  # Something wrong with TCP port scan
+                        logger.warning("Unable to run TCP port scan. Make sure the target is reachable, or run the scan manually.")
+
             if 'udp' in task:
                 # Run nmap UDP scan
-                nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
+                nmap_udp_results = perform_nmap_udp_scan(target_OK[0], args_dict)
             if 'nessus' in task:
                 # Run nessus scan
                 perform_nessus_scan(target_OK, args_dict)
@@ -480,12 +544,6 @@ def main():
                 # Run TLS Observatory scan
                 # Run ZAP scan(s)
                 # Run dirb scan
-            if 'ssh' in task:
-                # Added for completeness, we implicitly run ssh_scan
-                # as a part of nmap TCP scan, if required
-                continue
-            else:
-                return False
 
     else:
         logger.error("Unrecognised target(s) specified. Targets must be an IP address/range, subnet mask notation, FQDN or a hostname")
