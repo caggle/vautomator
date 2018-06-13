@@ -15,6 +15,7 @@ import json
 import logging
 import coloredlogs
 import socket
+from distutils.spawn import find_executable
 from netaddr import valid_ipv4, valid_ipv6, IPNetwork
 from urllib.parse import urlparse
 
@@ -146,10 +147,7 @@ def is_dirb_installed():
 
 
 def is_nessus_installed():
-    # Is Nessus locally installed?
-    # Note that we should not return False here if it's not locally installed,
-    # we want to be able to use scan_api to initiate a remote connection to Nessus over its API
-    # TODO: Figure this one out
+    # TODO: Figure this one out, this needs to be integrated with Tenable.io
 
     return False
 
@@ -175,11 +173,6 @@ def validate_target(target):
         target_type = 'DOMAIN'
         return target, target_type
 
-    # ... or an IP address or subnet mask notation
-    # else:
-    #    target_type = 'IP'
-    #    return (is_valid_ip(target), target_type)
-
 
 def perform_nmap_tcp_scan(target, tool_arguments):
     # Check to see if nmap is installed
@@ -190,16 +183,21 @@ def perform_nmap_tcp_scan(target, tool_arguments):
         # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
+        domain = target[0]
+        if (target[1] == 'URL'):
+            domain = urlparse(target[0]).netloc
+            print(domain)
+
         # Get target's resolved IP using system DNS
-        target_ip = socket.gethostbyname(target)
+        target_ip = socket.gethostbyname(domain)
         print(target_ip)
 
         nm = nmap.PortScanner()
-        nmap_arguments = '-v -Pn -sT -A --top-ports 1000 --open -T4 --system-dns'
+        nmap_arguments = '-v -Pn -sT -sV --top-ports 1000 --open -T4 --system-dns'
         if (tool_arguments['force_dns_lookup']):
             nmap_arguments += " -R"
         
-        results = nm.scan(target, arguments=nmap_arguments, sudo=False)
+        results = nm.scan(domain, arguments=nmap_arguments, sudo=False)
         if (target_ip == "".join(nm.all_hosts())):
             # Make this write to file before return
             print(results)
@@ -223,8 +221,12 @@ def perform_nmap_udp_scan(target, tool_arguments):
         # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
+        domain = target[0]
+        if (target[1] == 'URL'):
+            domain = urlparse(target[0]).netloc
+
         # Get target's resolved IP using system DNS
-        target_ip = socket.gethostbyname(target)
+        target_ip = socket.gethostbyname(domain)
         print(target_ip)
 
         udp_ports = "17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960"
@@ -236,7 +238,7 @@ def perform_nmap_udp_scan(target, tool_arguments):
 
         # nmap UDP scan requires sudo, setting it to true
         # Assume this will prompt the user to enter their password?
-        results = nm.scan(target, ports=udp_ports, arguments=nmap_arguments, sudo=True)
+        results = nm.scan(domain, ports=udp_ports, arguments=nmap_arguments, sudo=True)
         if (target_ip == "".join(nm.all_hosts())):
             # Make this write to file before return
             print(results)
@@ -265,7 +267,6 @@ def perform_sshscan_scan(target, ssh_port=22):
         container_name = docker_client.containers.list(filters={'ancestor': 'mozilla/ssh_scan'}, limit=1)[0].name
         # Potential OS command injection venue here?
         p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None, shell=True)
-        container_name.stop()
         return True
 
     # Here only testing if it may have been installed as a Ruby gem
@@ -299,9 +300,13 @@ def perform_httpobs_scan(target):
 
     logger.info("[+] Attempting to run HTTP Observatory scan...")
 
+    domain = urlparse(target[0]).netloc
+    tool_path = find_executable('observatory')
+    
     if (is_observatory_installed()):
-        cmd = "observatory --format json -z -q --rescan " + target + " > " + target + "__httpobs_scan.json"
+        cmd = tool_path + " --format json -z --rescan " + domain + " > " + domain + "__httpobs_scan.json"
         sanitised_cmd = sanitise_shell_command(cmd)
+        print(sanitised_cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
@@ -314,7 +319,7 @@ def perform_httpobs_scan(target):
     # way does not allow us to capture output. Therefore
     # we will use a script provided instead (httpobs-local-scan)
     elif (importlib.util.find_spec("httpobs.scanner.local")):
-        script = "httpobs-local-scan --format json " + target + " > " + target + "__httpobs_scan.json"
+        script = "httpobs-local-scan --format json \"" + domain + "\" > " + domain + "__httpobs_scan.json"
         sanitised_script = sanitise_shell_command(script)
         p = subprocess.Popen(sanitised_script, shell=True)
         p.wait()
@@ -406,7 +411,7 @@ def perform_zap_scan(target, tool_arguments):
 
 
 def sanitise_shell_command(command):
-    return shlex.quote(command)
+    return shlex.split(shlex.quote(command))
 
 
 def main():
@@ -481,16 +486,21 @@ def main():
 
         for task in tasklist:
             if 'tcp' in task:
-                if (target_OK[1] != 'URL'):
+                # if (target_OK[1] != 'URL'):
                     # Run nmap TCP scan
-                    nmap_tcp_results = perform_nmap_tcp_scan(target_OK[0], args_dict)
+                    nmap_tcp_results = perform_nmap_tcp_scan(target_OK, args_dict)
                 
                     if (nmap_tcp_results):
                         # if ssh is exposed, run SSH scan...
                         
-                        if (target_OK[1] == 'DOMAIN'):
+                        if (target_OK[1] != 'IP'):
                             # Get target's resolved IP using system DNS
-                            target_ip = socket.gethostbyname(target_OK[0])
+                            try:
+                                target_ip = socket.gethostbyname(target_OK[0])
+                            except:
+                                # means we have URL
+                                target_ip = socket.gethostbyname(urlparse(target_OK[0]).netloc)
+
                             if nmap_tcp_results[target_ip].has_tcp(22):
                                 ssh_found = True
                                 perform_sshscan_scan(target_ip, 22)
@@ -534,7 +544,7 @@ def main():
 
             if 'udp' in task:
                 # Run nmap UDP scan
-                nmap_udp_results = perform_nmap_udp_scan(target_OK[0], args_dict)
+                nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
             if 'nessus' in task:
                 # Run nessus scan
                 perform_nessus_scan(target_OK, args_dict)
