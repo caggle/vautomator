@@ -2,7 +2,7 @@
 
 from __future__ import print_function
 import sys
-import time
+import pytz
 import argparse
 import re
 import subprocess
@@ -15,9 +15,14 @@ import json
 import logging
 import coloredlogs
 import socket
+import os
 from distutils.spawn import find_executable
 from netaddr import valid_ipv4, valid_ipv6, IPNetwork
 from urllib.parse import urlparse
+from tenable_io.api.models import Scan
+from tenable_io.api.scans import ScanExportRequest
+from tenable_io.client import TenableIOClient
+from tenable_io.exceptions import TenableIOApiException
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +79,17 @@ def is_valid_ip(ip_notation):
         return False
 
 
+def is_go_installed():
+    try:
+        status, output = subprocess.getstatusoutput('which go')
+        if status == 0:
+            return True
+        else:
+            return False
+
+    except OSError:
+        return False
+
 def is_nmap_installed():
     try:
         status, output = subprocess.getstatusoutput('which nmap')
@@ -111,15 +127,20 @@ def is_observatory_installed():
 
 
 def is_TLSobservatory_installed():
-    try:
-        status, output = subprocess.getstatusoutput('tlsobs')
-        if status == 0:
-            return True
-        else:
-            return False
 
-    except OSError:
+    # TLSObs is a go-based tool, check if go is available first
+    if not is_go_installed():
         return False
+    else:   
+        try:
+            status, output = subprocess.getstatusoutput('tlsobs')
+            if status == 0:
+                return True
+            else:
+                return False
+
+        except OSError:
+            return False
 
 
 def is_sshscan_installed():
@@ -146,10 +167,16 @@ def is_dirb_installed():
         return False
 
 
-def is_nessus_installed():
-    # TODO: Figure this one out, this needs to be integrated with Tenable.io
+def is_gobuster_installed():
+    try:
+        status, output = subprocess.getstatusoutput('gobuster')
+        if status == 0:
+            return True
+        else:
+            return False
 
-    return False
+    except OSError:
+        return False
 
 
 def validate_target(target):
@@ -186,11 +213,9 @@ def perform_nmap_tcp_scan(target, tool_arguments):
         domain = target[0]
         if (target[1] == 'URL'):
             domain = urlparse(target[0]).netloc
-            print(domain)
 
         # Get target's resolved IP using system DNS
         target_ip = socket.gethostbyname(domain)
-        print(target_ip)
 
         nm = nmap.PortScanner()
         nmap_arguments = '-v -Pn -sT -sV --top-ports 1000 --open -T4 --system-dns'
@@ -207,7 +232,7 @@ def perform_nmap_tcp_scan(target, tool_arguments):
             return False
 
     else:
-        print("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
+        logger.warning("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
 
 
@@ -227,7 +252,6 @@ def perform_nmap_udp_scan(target, tool_arguments):
 
         # Get target's resolved IP using system DNS
         target_ip = socket.gethostbyname(domain)
-        print(target_ip)
 
         udp_ports = "17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960"
 
@@ -248,14 +272,15 @@ def perform_nmap_udp_scan(target, tool_arguments):
             return False
 
     else:
-        print("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
+        logger.warning("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
 
 
 def perform_sshscan_scan(target, ssh_port=22):
-    """Since we are already utilising Docker for other tasks,
-    will use Docker here as well
-    """
+    # Since we are already utilising Docker for other tasks,
+    # will use Docker here as well
+    # Note that target parameter here is NOT a tuple
+    
     logger.info("[+] Attempting to run ssh_scan as an SSH service was identified on target...")
     sshport = ssh_port.__str__()
 
@@ -277,21 +302,28 @@ def perform_sshscan_scan(target, ssh_port=22):
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
-        if (not p.returncode):
-            return False
-        else:
-            return True
+        return p.returncode
+
     else:
-        print("Either Docker or ssh_scan is either not installed or is not in your $PATH. Skipping ssh_scan scan.")
+        logger.warning("Either Docker or ssh_scan is either not installed or is not in your $PATH. Skipping ssh_scan scan.")
         return False
 
 
 def perform_nessus_scan(target, tool_arguments):
 
-    # logger.info("[+] Attempting to run a Nessus scan...")
+    logger.info("[+] Attempting to run a Nessus scan...")
+    # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
+    try:
+        client = TenableIOClient()
+        nessus_scan = client.scan_helper.create(name='Scan_for_ ' + target[0], text_targets=target[0], template='basic')
+        # Let's allow up to 60 minutes for the scan to run and finish
+        nessus_scan.launch().wait_or_cancel_after(60) 
+        nessus_scan.download(target[0] + '.nessus', nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
+    except:
+        logger.warning("Nessus scan could not run. Make sure you have provided API keys to communicate with Tenable.io.")
+        return False
 
-    print("Nessus scan is not yet supported. Skipping.")
-    return False
+    return True
 
 
 # There are 2 ways to implement this, first I will check if the CLI version of observatory is available
@@ -310,26 +342,22 @@ def perform_httpobs_scan(target):
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
-        if (not p.returncode):
-            return False
-        else:
-            return True
+        return p.returncode
 
     # It's not installed, but the python package is. However programmatic
     # way does not allow us to capture output. Therefore
     # we will use a script provided instead (httpobs-local-scan)
+    # Don't do this, instead use: https://github.com/mozilla/http-observatory (the python library)
     elif (importlib.util.find_spec("httpobs.scanner.local")):
-        script = "httpobs-local-scan --format json \"" + domain + "\" > " + domain + "__httpobs_scan.json"
+        script = "httpobs-local-scan --format json " + domain + " > " + domain + "__httpobs_scan.json"
         sanitised_script = sanitise_shell_command(script)
         p = subprocess.Popen(sanitised_script, shell=True)
         p.wait()
 
-        if (not p.returncode):
-            return False
-        else:
-            return True
+        return p.returncode
+
     else:
-        print("HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
+        logger.warning("HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
         return False
 
 
@@ -337,52 +365,72 @@ def perform_tlsobs_scan(target):
 
     logger.info("[+] Attempting to run TLS Observatory scan...")
 
+    domain = urlparse(target[0]).netloc
+    tool_path = find_executable('tlsobs')
+
     if (is_TLSobservatory_installed()):
-        cmd = "tlsobs -r " + target + " > " + target + "__tlsobs_scan.json"
+        cmd = tool_path + " -r " + domain + " > " + domain + "__tlsobs_scan.json"
         sanitised_cmd = sanitise_shell_command(cmd)
+        print(sanitised_cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
-        if (not p.returncode):
-            return False
-        else:
-            return True
+        return p.returncode
+
     # This tool is also available as a docker image
     elif (is_docker_installed()):
         docker_client = docker.from_env()
+        print("AAA")
         docker_client.images.pull('mozilla/tls-observatory')
-        # Potential OS command injection venue here?
-        docker_client.containers.run('mozilla/tls-observatory', 'tlsobs -r ' + target + ' > /tmp/' + target + '__tlsobs_scan.json')
-        # Copy the resulting file back to local system
-        p = subprocess.Popen('docker cp mozilla/tls-observatory:/tmp/' + target + '__tlsobs_scan.json .', stdin=None, stdout=None, stderr=None)
+        print("BBB")
+        docker_client.containers.run('mozilla/tls-observatory', 'tlsobs -r ' + domain + ' > ' + domain + '__tlsobs_scan.json')
         return True
 
     else:
-        print("Either Docker or TLS Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
+        logger.warning("Either Docker or TLS Observatory or go is either not installed or is not in your $PATH. Skipping TLS Observatory scan.")
         return False
 
 
-def perform_dirb_scan(target):
-    # TODO: This is a terrible implementation. dirb takes approx. 2
-    # hours to run. We cannot wait till it finishes
-    # This will require some proper multi-threading.
-    # For now, let's run this as the last task.
+def perform_directory_bruteforce(target, wordlist):
+    # TODO: This is a terrible implementation. The tools here take approx. 2
+    # hours to finish. Also, based on what's available on the system, we are
+    # running different tools. For instance, if go & gobuster installed, we
+    # use that. If not, we check if dirb is already installed. If not that
+    # either, then we use attempt to download kali-linux docker image, and
+    # run dirb off that (woah!)
 
     logger.info("[+] Attempting to run directory brute-forcing on the target URL...")
-    logger.info("[+] This may take a while, go get a coffee or something.")
+    logger.info("[+] This may take a while, go have lunch or something.")
 
-    if (is_dirb_installed()):
-        cmd = "dirb " + target + " -f -w -r -S -o " + target + "__dirb_scan.txt"
+    # Check if go is installed
+    if (is_go_installed() and is_gobuster_installed()):
+        cmd = "gobuster -u " + target[0] + " -w " + wordlist + " -o " + target[0] + "__gobuster_scan.txt"
         sanitised_cmd = sanitise_shell_command(cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
+        return p.returncode
+    
+    elif (is_dirb_installed()):
+        cmd = "dirb " + target[0] + " " + wordlist + " -f -w -r -S -o " + target[0] + "__dirb_scan.txt"
+        sanitised_cmd = sanitise_shell_command(cmd)
+        p = subprocess.Popen(sanitised_cmd, shell=True)
+        p.wait()
+        return p.returncode
 
-        if (not p.returncode):
-            return False
-        else:
-            return True
+    elif (is_docker_installed()):
+        wordlist = "/usr/share/wordlists/dirb/common.txt"
+        logger.info("[+] Neither gobuster nor dirb is found locally, downloading Kali Linux docker image...")
+        docker_client = docker.from_env()
+        docker_client.images.pull('kalilinux/kali-linux-docker')
+        docker_client.containers.run('kalilinux/kali-linux-docker', 'dirb ' + target[0] + ' ' + wordlist + '  -f -w -r -S -o ' + '/tmp/' + target[0] + '__dirb_scan.txt')       
+        # Copy the resulting file back to local system
+        container_name = docker_client.containers.list(filters={'ancestor': 'kalilinux/kali-linux-docker'}, limit=1)[0].name
+        # Potential OS command injection venue here?
+        p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target[0] + '__dirb_scan.txt .', stdin=None, stdout=None, stderr=None, shell=True)
+        return p.returncode
+        
     else:
-        print("dirb is either not installed or is not in your $PATH. Skipping dirb scan.")
+        logger.warning("Directory brute-force could not be performed. Skipping. Please perform manually.")
         return False
 
 
@@ -394,19 +442,19 @@ def perform_zap_scan(target, tool_arguments):
         docker_client = docker.from_env()
         docker_client.images.pull('owasp/zap2docker-weekly')
         # Potential OS command injection venue here?
-        if (tool_arguments['safe-scan']):
-            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-baseline.py -t ' + target + ' -J /tmp/' + target + '__ZAP_baseline.json')
+        if (tool_arguments['safe_scan']):
+            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-baseline.py -t ' + target[0] + ' -J /tmp/' + target[0] + '__ZAP_baseline.json')
             # Copy the resulting file back to local system
-            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target + '__ZAP_baseline.json .', stdin=None, stdout=None, stderr=None)
+            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target[0] + '__ZAP_baseline.json .', stdin=None, stdout=None, stderr=None)
             return True
         else:
-            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-full-scan.py -m 1 -T 5 -d -t ' + target + ' -J /tmp/' + target + '__ZAP_full.json')
+            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-full-scan.py -m 1 -T 5 -d -t ' + target[0] + ' -J /tmp/' + target[0] + '__ZAP_full.json')
             # Copy the resulting file back to local system
-            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target + '__ZAP_full.json .', stdin=None, stdout=None, stderr=None)
+            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target[0] + '__ZAP_full.json .', stdin=None, stdout=None, stderr=None)
             return True
 
     else:
-        print("ZAP scan relies on Docker, but Docker is not installed or is not in your $PATH. Skipping ZAP scan.")
+        logger.warning("ZAP scan relies on Docker, but Docker is not installed or is not in your $PATH. Skipping ZAP scan.")
         return False
 
 
@@ -417,14 +465,6 @@ def sanitise_shell_command(command):
 def main():
 
     global args
-
-    """
-    safe_scan = False
-    web_app_scan = False
-    compress_output = False
-    verbose_output = False
-    force_dns_lookup = False
-    """
 
     args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
     'verbose_output': False, 'force_dns_lookup': False}
@@ -444,30 +484,27 @@ def main():
     ' progress indicator')
     parser.add_argument('-r', action='store_true', help='Force perform'\
     ' a DNS lookup')
-    # parser.add_argument('-h', help='Display this help text')
 
     args = parser.parse_args()
 
-    # Target validation
+    # Target validation happens here
     target_OK = validate_target(args.target)
     # Target_OK here is a tuple now
     # First index is either a boolean False, or a string of IP address(es), or a hostname or a URL
-    print(target_OK)
 
     if (target_OK[0]):
         # If target_OK is a tuple whose first element is not False, we can start running the tasks
+        # At a minimum, the following tasks are required for a VA:
+        #  1. TCP port scan
+        #  2. UDP port scan
+        #  3. Nessus scan
 
-        """At a minimum, the following tasks are required for a VA:
-           1. TCP port scan
-           2. UDP port scan
-           3. Nessus scan
-        """
         tasklist = ['tcp-port-scan', 'udp-port-scan', 'nessus-scan']
 
         if args.safe_scan:
             args_dict['safe_scan'] = True
 
-        if args.w | ("http" in urlparse(args.target).scheme):
+        if args.w or target_OK[1] == 'URL':
             args_dict['web_app_scan'] = True
             tasklist.append('web-app-scan')
 
@@ -545,15 +582,18 @@ def main():
             if 'udp' in task:
                 # Run nmap UDP scan
                 nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
-            if 'nessus' in task:
+            # if 'nessus' in task:
                 # Run nessus scan
-                perform_nessus_scan(target_OK, args_dict)
+                # perform_nessus_scan(target_OK, args_dict)
             if 'web' in task:
                 # Run HTTP Observatory scan
                 httpobs_scan_results = perform_httpobs_scan(target_OK)
                 # Run TLS Observatory scan
+                # tlsobs_scan_results = perform_tlsobs_scan(target_OK)
                 # Run ZAP scan(s)
+                zap_scan_results = perform_zap_scan(target_OK, args_dict)
                 # Run dirb scan
+                directory_scan_results = perform_directory_bruteforce(target_OK)
 
     else:
         logger.error("Unrecognised target(s) specified. Targets must be an IP address/range, subnet mask notation, FQDN or a hostname")
