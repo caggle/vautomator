@@ -2,7 +2,6 @@
 
 from __future__ import print_function
 import sys
-import pytz
 import argparse
 import re
 import subprocess
@@ -19,10 +18,17 @@ import os
 from distutils.spawn import find_executable
 from netaddr import valid_ipv4, valid_ipv6, IPNetwork
 from urllib.parse import urlparse
-from tenable_io.api.models import Scan
 from tenable_io.api.scans import ScanExportRequest
 from tenable_io.client import TenableIOClient
 from tenable_io.exceptions import TenableIOApiException
+from httpobs.scanner.local import scan
+
+# TODO: 
+# 1) Make ZAP work - DONE
+# 2) Make dirb work - !!!
+# 3) Introduce exception handling - DONE
+# 4) Clean up argparse
+# 5) Fix docker copy stuff (assign tool results to a variable)
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,7 @@ def is_go_installed():
 
     except OSError:
         return False
+
 
 def is_nmap_installed():
     try:
@@ -242,7 +249,7 @@ def perform_nmap_udp_scan(target, tool_arguments):
     logger.warning("[!] Note: UDP scan requires sudo. You will be prompted for your local account password.")
 
     if (is_nmap_installed()):
-        # Currently the nmap UDP scan ports are known. Therefore will hard code them here.
+        # Currently the nmap UDP scan ports are known. Therefore will hardcode them here.
         # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
@@ -285,14 +292,39 @@ def perform_sshscan_scan(target, ssh_port=22):
     sshport = ssh_port.__str__()
 
     if (is_docker_installed()):
-        docker_client = docker.from_env()
-        docker_client.images.pull('mozilla/ssh_scan')
-        docker_client.containers.run('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -o /tmp/' + target + '__sshscan.json -t ' + target)
-        # Copy the resulting file back to local system, same directory
-        container_name = docker_client.containers.list(filters={'ancestor': 'mozilla/ssh_scan'}, limit=1)[0].name
-        # Potential OS command injection venue here?
-        p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None, shell=True)
+        try:
+            docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
+        except Exception as DockerNotRunningError:
+            logger.error("[!] Docker is installed but not running. Skipping ssh_scan scan.")
+            return False
+
+        # Clean up containers with the same name which may be leftovers
+        try:
+            docker_client.remove_container("sshscan-container")
+        except docker.errors.APIError as ContainerNotExistsError:
+            # Log for debug, change pass later
+            pass
+        # Check if image exists first
+        try:
+            docker_client.inspect_image('mozilla/ssh_scan')
+        except docker.errors.APIError as ImageNotExistsError:
+            docker_client.pull('mozilla/ssh_scan')
+
+        container = docker_client.create_container('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -t ' + target, name='sshscan-container')
+        docker_client.start(container)
+        docker_client.wait(container.get('Id'))
+        sshscan_output = docker_client.logs(container.get('Id'))
+        # This tlsobs_output we should send it somewhere, for now logging to a file
+        outfile = open(target + '__sshscan.json', 'w+')
+        outfile.write(str(sshscan_output, 'utf-8'))
         return True
+
+        # docker_client.containers.run('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -o /tmp/' + target + '__sshscan.json -t ' + target)
+        # # Copy the resulting file back to local system, same directory
+        # container_name = docker_client.containers.list(filters={'ancestor': 'mozilla/ssh_scan'}, limit=1)[0].name
+        # # Potential OS command injection venue here?
+        # p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None, shell=True)
+        # return True
 
     # Here only testing if it may have been installed as a Ruby gem
     elif (is_sshscan_installed()):
@@ -333,32 +365,22 @@ def perform_httpobs_scan(target):
     logger.info("[+] Attempting to run HTTP Observatory scan...")
 
     domain = urlparse(target[0]).netloc
-    tool_path = find_executable('observatory')
-    
-    if (is_observatory_installed()):
-        cmd = tool_path + " --format json -z --rescan " + domain + " > " + domain + "__httpobs_scan.json"
-        sanitised_cmd = sanitise_shell_command(cmd)
-        print(sanitised_cmd)
-        p = subprocess.Popen(sanitised_cmd, shell=True)
-        p.wait()
-
-        return p.returncode
-
-    # It's not installed, but the python package is. However programmatic
-    # way does not allow us to capture output. Therefore
-    # we will use a script provided instead (httpobs-local-scan)
-    # Don't do this, instead use: https://github.com/mozilla/http-observatory (the python library)
-    elif (importlib.util.find_spec("httpobs.scanner.local")):
-        script = "httpobs-local-scan --format json " + domain + " > " + domain + "__httpobs_scan.json"
-        sanitised_script = sanitise_shell_command(script)
-        p = subprocess.Popen(sanitised_script, shell=True)
-        p.wait()
-
-        return p.returncode
-
-    else:
-        logger.warning("HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
-        return False
+    try:
+        httpobs_result = scan(domain)
+        print(httpobs_result)
+        return True
+    except Exception as httpobsError:
+        tool_path = find_executable('observatory')
+        if (is_observatory_installed()):
+            cmd = tool_path + " --format json -z --rescan " + domain + " > " + domain + "__httpobs_scan.json"
+            sanitised_cmd = sanitise_shell_command(cmd)
+            print(sanitised_cmd)
+            p = subprocess.Popen(sanitised_cmd, shell=True)
+            p.wait()
+            return p.returncode
+        else:
+            logger.warning("HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
+            return False
 
 
 def perform_tlsobs_scan(target):
@@ -379,11 +401,30 @@ def perform_tlsobs_scan(target):
 
     # This tool is also available as a docker image
     elif (is_docker_installed()):
-        docker_client = docker.from_env()
-        print("AAA")
-        docker_client.images.pull('mozilla/tls-observatory')
-        print("BBB")
-        docker_client.containers.run('mozilla/tls-observatory', 'tlsobs -r ' + domain + ' > ' + domain + '__tlsobs_scan.json')
+        try:
+            docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
+        except Exception as DockerNotRunningError:
+            logger.error("[!] Docker is installed but not running. Skipping TLS Observatory scan.")
+            return False
+        # Clean up containers with the same name which may have left
+        try:
+            docker_client.remove_container("tlsobs-container")
+        except docker.errors.APIError as ContainerNotExistsError:
+            # Log for debug, change pass later
+            pass
+        # Check if image exists first
+        try:
+            docker_client.inspect_image('mozilla/tls-observatory')
+        except docker.errors.APIError as ImageNotExistsError:
+            docker_client.pull('mozilla/tls-observatory')
+
+        container = docker_client.create_container('mozilla/tls-observatory', 'tlsobs -r -raw ' + domain)
+        docker_client.start(container)
+        docker_client.wait(container.get('Id'))
+        tlsobs_output = docker_client.logs(container.get('Id'))
+        # This tlsobs_output we should send it somewhere, for now logging to a file
+        outfile = open(domain + '__tlsobs_scan.json', 'w+')
+        outfile.write(str(tlsobs_output, 'utf-8'))
         return True
 
     else:
@@ -418,16 +459,38 @@ def perform_directory_bruteforce(target, wordlist):
         return p.returncode
 
     elif (is_docker_installed()):
-        wordlist = "/usr/share/wordlists/dirb/common.txt"
         logger.info("[+] Neither gobuster nor dirb is found locally, downloading Kali Linux docker image...")
-        docker_client = docker.from_env()
-        docker_client.images.pull('kalilinux/kali-linux-docker')
-        docker_client.containers.run('kalilinux/kali-linux-docker', 'dirb ' + target[0] + ' ' + wordlist + '  -f -w -r -S -o ' + '/tmp/' + target[0] + '__dirb_scan.txt')       
-        # Copy the resulting file back to local system
-        container_name = docker_client.containers.list(filters={'ancestor': 'kalilinux/kali-linux-docker'}, limit=1)[0].name
+        try:
+            docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
+        except Exception as DockerNotRunningError:
+            logger.error("[!] Docker is installed but not running. Skipping directory brute-force scan.")
+            return False
+
+        # Clean up containers with the same name which may be left-overs
+        try:
+            docker_client.remove_container("kali-container")
+        except docker.errors.APIError as ContainerNotExistsError:
+            # Log for debug, change pass later
+            pass
+    
+        dirb_command = "dirb " + target[0] + " " + wordlist + " -f -w -r -S -o " + target[0] + "__dirb_scan.txt"
+        # Check if image exists first
+        try:
+            docker_client.inspect_image('kalilinux/kali-linux-docker')
+        except docker.errors.APIError as ImageNotExistsError:
+            docker_client.pull('kalilinux/kali-linux-docker')
+
+        container = docker_client.create_container('kalilinux/kali-linux-docker', dirb_command, name="kali-container")
+        docker_client.start(container)
+        docker_client.wait(container.get('Id'))
+        # Get the container logs anyway in case the tool did not run due to an error etc.
+        # Need to do something with this
+        kali_logs = docker_client.logs(container.get('Id'))
+        return True
+
         # Potential OS command injection venue here?
-        p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target[0] + '__dirb_scan.txt .', stdin=None, stdout=None, stderr=None, shell=True)
-        return p.returncode
+        # p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target[0] + '__dirb_scan.txt .', stdin=None, stdout=None, stderr=None, shell=True)
+        #return p.returncode
         
     else:
         logger.warning("Directory brute-force could not be performed. Skipping. Please perform manually.")
@@ -437,21 +500,46 @@ def perform_directory_bruteforce(target, wordlist):
 def perform_zap_scan(target, tool_arguments):
 
     logger.info("[+] Attempting to run ZAP scan on the target URL...")
+    domain = urlparse(target[0]).netloc
 
     if (is_docker_installed()):
-        docker_client = docker.from_env()
-        docker_client.images.pull('owasp/zap2docker-weekly')
-        # Potential OS command injection venue here?
+        
         if (tool_arguments['safe_scan']):
-            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-baseline.py -t ' + target[0] + ' -J /tmp/' + target[0] + '__ZAP_baseline.json')
-            # Copy the resulting file back to local system
-            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target[0] + '__ZAP_baseline.json .', stdin=None, stdout=None, stderr=None)
-            return True
+            file_suffix = "__ZAP_baseline.json"
+            zap_command = "zap-baseline.py -t " + target[0] + " -J " + domain + file_suffix
         else:
-            docker_client.containers.run('owasp/zap2docker-weekly', 'zap-full-scan.py -m 1 -T 5 -d -t ' + target[0] + ' -J /tmp/' + target[0] + '__ZAP_full.json')
-            # Copy the resulting file back to local system
-            p = subprocess.Popen('docker cp owasp/zap2docker-weekly:/tmp/' + target[0] + '__ZAP_full.json .', stdin=None, stdout=None, stderr=None)
-            return True
+            file_suffix = "__ZAP_full.json"
+            zap_command = "zap-full-scan.py -m 1 -T 5 -d -t " + target[0] + " -J " + domain + file_suffix
+
+        try:
+            docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
+        except Exception as DockerNotRunningError:
+            logger.error("[!] Docker is installed but not running. Skipping ZAP scan.")
+            return False
+
+        # Clean up containers with the same name which may have left
+        try:
+            docker_client.remove_container("ZAP-container")
+        except docker.errors.APIError as ContainerNotExistsError:
+            # Log for debug, change pass later
+            pass
+        # Check if image exists first
+        try:
+            docker_client.inspect_image('owasp/zap2docker-weekly')
+        except docker.errors.APIError as ImageNotExistsError:
+            docker_client.pull('owasp/zap2docker-weekly')
+
+        container = docker_client.create_container('owasp/zap2docker-weekly', zap_command, name="ZAP-container",
+        volumes=['/zap/wrk'], host_config=docker_client.create_host_config(binds=[
+        os.getcwd() + ':/zap/wrk/:rw']))
+        docker_client.start(container)
+        docker_client.wait(container.get('Id'))
+        # Get the container logs anyway in case the tool did not run due to an error etc.
+        # Need to do something with this
+        zap_logs = docker_client.logs(container.get('Id'))
+        if "ERROR" in zap_logs.__str__():
+            print("ERROR in ZAP scan!!!")
+        return True
 
     else:
         logger.warning("ZAP scan relies on Docker, but Docker is not installed or is not in your $PATH. Skipping ZAP scan.")
@@ -468,6 +556,9 @@ def main():
 
     args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
     'verbose_output': False, 'force_dns_lookup': False}
+
+    # Default wordlist
+    wordlist = "/usr/share/wordlists/dirb/common.txt"
 
     # Parse the command line
     parser = argparse.ArgumentParser(usage='%(prog)s [options] target')
@@ -581,19 +672,20 @@ def main():
 
             if 'udp' in task:
                 # Run nmap UDP scan
-                nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
+                # nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
+                print("AAA")
             # if 'nessus' in task:
                 # Run nessus scan
                 # perform_nessus_scan(target_OK, args_dict)
             if 'web' in task:
                 # Run HTTP Observatory scan
-                httpobs_scan_results = perform_httpobs_scan(target_OK)
+                # httpobs_scan_results = perform_httpobs_scan(target_OK)
                 # Run TLS Observatory scan
                 # tlsobs_scan_results = perform_tlsobs_scan(target_OK)
                 # Run ZAP scan(s)
-                zap_scan_results = perform_zap_scan(target_OK, args_dict)
+                # zap_scan_results = perform_zap_scan(target_OK, args_dict)
                 # Run dirb scan
-                directory_scan_results = perform_directory_bruteforce(target_OK)
+                directory_scan_results = perform_directory_bruteforce(target_OK, wordlist)
 
     else:
         logger.error("Unrecognised target(s) specified. Targets must be an IP address/range, subnet mask notation, FQDN or a hostname")
