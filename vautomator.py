@@ -28,13 +28,15 @@ from httpobs.scanner.local import scan
 # 2) Make dirb work - !!!
 # 3) Introduce exception handling - DONE
 # 4) Clean up argparse - DONE
-# 5) Add debug/verbose flag and output
+# 5) Add debug/verbose flag and output - DONE
 # 6) Fix docker copy stuff (assign tool results to a variable) - DONE
 # 7) Make it so it does not require user interaction (i.e. password prompt etc.)
+# 8) Change log format, clean up "prints" - DONE
 
 logger = logging.getLogger(__name__)
 # Default logging level is INFO
-coloredlogs.install(level='INFO', logger=logger)
+coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
+fmt='[%(hostname)s] %(asctime)s %(levelname)s %(message)s')
 
 
 # Various helper functions are defined first
@@ -209,6 +211,11 @@ def validate_target(target):
         target_type = 'DOMAIN'
         return target, target_type
 
+    else:
+        target = False
+        target_type = False
+        return target, target_type
+
 
 def perform_nmap_tcp_scan(target):
     # Check to see if nmap is installed
@@ -232,7 +239,7 @@ def perform_nmap_tcp_scan(target):
         results = nm.scan(domain, arguments=nmap_arguments, sudo=False)
         if (target_ip == "".join(nm.all_hosts())):
             # Make this write to file before return
-            print(results)
+            logger.debug("Nmap TCP scan output:" + str(results))
             return nm
         else:
             logger.error("[-] Nmap TCP scan error!")
@@ -270,7 +277,7 @@ def perform_nmap_udp_scan(target):
         results = nm.scan(domain, ports=udp_ports, arguments=nmap_arguments, sudo=True)
         if (target_ip == "".join(nm.all_hosts())):
             # Make this write to file before return
-            print(results)
+            logger.debug("Nmap UDP scan output: " + results)
             return nm
         else:
             logger.error("[-] Nmap UDP scan error!")
@@ -357,7 +364,7 @@ def perform_nessus_scan(target):
 
 
 # There are 2 ways to implement this, first I will check if the CLI version of observatory is available
-# If it is, use that. If not, I will use a provided script (in the package) to run it.
+# If it is, use that. If not, try to run the scan programmatically.
 def perform_httpobs_scan(target):
 
     logger.info("[+] Attempting to run HTTP Observatory scan...")
@@ -365,14 +372,13 @@ def perform_httpobs_scan(target):
     domain = urlparse(target[0]).netloc
     try:
         httpobs_result = scan(domain)
-        print(httpobs_result)
+        logger.debug("HTTP Observatory output: " + httpobs_result)
         return True
     except Exception as httpobsError:
         tool_path = find_executable('observatory')
         if (is_observatory_installed()):
             cmd = tool_path + " --format json -z --rescan " + domain + " > " + domain + "__httpobs_scan.json"
             sanitised_cmd = sanitise_shell_command(cmd)
-            print(sanitised_cmd)
             p = subprocess.Popen(sanitised_cmd, shell=True)
             p.wait()
             return p.returncode
@@ -391,7 +397,6 @@ def perform_tlsobs_scan(target):
     if (is_TLSobservatory_installed()):
         cmd = tool_path + " -r " + domain + " > " + domain + "__tlsobs_scan.json"
         sanitised_cmd = sanitise_shell_command(cmd)
-        print(sanitised_cmd)
         p = subprocess.Popen(sanitised_cmd, shell=True)
         p.wait()
 
@@ -536,7 +541,7 @@ def perform_zap_scan(target, tool_arguments):
         # Need to do something with this
         zap_logs = docker_client.logs(container.get('Id'))
         if "ERROR" in zap_logs.__str__():
-            print("ERROR in ZAP scan!!!")
+            logger.error("[-] ERROR in ZAP scan.")
         return True
 
     else:
@@ -608,12 +613,12 @@ def main():
         if args.verbose:
             args_dict['verbose_output'] = True
             # In verbose more we shall show DEBUG or more severe
-            coloredlogs.set_level(level='DEBUG')
+            coloredlogs.install(level='DEBUG', logger=logger, reconfigure=True)
 
         if args.quiet:
             args_dict['quiet_run'] = True
             # In quiet mode we shall only show ERROR or more severe
-            coloredlogs.set_level(level='ERROR')
+            coloredlogs.install(level='ERROR', logger=logger, reconfigure=True)
 
         # Let's start running the tasks...
 
@@ -695,8 +700,8 @@ def main():
                 directory_scan_results = perform_directory_bruteforce(target_OK, wordlist)
 
     else:
-        logger.critical("[X] Unrecognised target(s) specified. Targets must be \
-        an IP address/range, subnet mask notation, FQDN or a hostname.")
+        logger.critical("[X] Unrecognised target(s) specified. Targets must be "\
+        "an IP address/range, subnet mask notation, FQDN or a hostname.")
         sys.exit(-1)
 
 
