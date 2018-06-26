@@ -27,12 +27,14 @@ from httpobs.scanner.local import scan
 # 1) Make ZAP work - DONE
 # 2) Make dirb work - !!!
 # 3) Introduce exception handling - DONE
-# 4) Clean up argparse
-# 5) Fix docker copy stuff (assign tool results to a variable)
-
+# 4) Clean up argparse - DONE
+# 5) Add debug/verbose flag and output
+# 6) Fix docker copy stuff (assign tool results to a variable) - DONE
+# 7) Make it so it does not require user interaction (i.e. password prompt etc.)
 
 logger = logging.getLogger(__name__)
-coloredlogs.install(level='DEBUG', logger=logger)
+# Default logging level is INFO
+coloredlogs.install(level='INFO', logger=logger)
 
 
 # Various helper functions are defined first
@@ -60,7 +62,7 @@ def is_valid_ipv4(ip_str):
             IPNetwork(ip_str)
             return True
         except:
-            logger.error("Incorrect IP in CIDR notation.")
+            logger.error("[-] Incorrect IP in CIDR notation.")
             return False
     else:
         return valid_ipv4(ip_str)
@@ -208,7 +210,7 @@ def validate_target(target):
         return target, target_type
 
 
-def perform_nmap_tcp_scan(target, tool_arguments):
+def perform_nmap_tcp_scan(target):
     # Check to see if nmap is installed
     logger.info("[+] Attempting to run Nmap TCP scan...")
 
@@ -226,8 +228,6 @@ def perform_nmap_tcp_scan(target, tool_arguments):
 
         nm = nmap.PortScanner()
         nmap_arguments = '-v -Pn -sT -sV --top-ports 1000 --open -T4 --system-dns'
-        if (tool_arguments['force_dns_lookup']):
-            nmap_arguments += " -R"
         
         results = nm.scan(domain, arguments=nmap_arguments, sudo=False)
         if (target_ip == "".join(nm.all_hosts())):
@@ -235,15 +235,15 @@ def perform_nmap_tcp_scan(target, tool_arguments):
             print(results)
             return nm
         else:
-            logger.error("Nmap TCP scan error!")
+            logger.error("[-] Nmap TCP scan error!")
             return False
 
     else:
-        logger.warning("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
+        logger.warning("[!] Nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
 
 
-def perform_nmap_udp_scan(target, tool_arguments):
+def perform_nmap_udp_scan(target):
     # Check to see if nmap is installed
     logger.info("[+] Attempting to run Nmap UDP scan...")
     logger.warning("[!] Note: UDP scan requires sudo. You will be prompted for your local account password.")
@@ -264,8 +264,6 @@ def perform_nmap_udp_scan(target, tool_arguments):
 
         nm = nmap.PortScanner()
         nmap_arguments = '-v -Pn -sU -sV --open -T4 --system-dns'
-        if (tool_arguments['force_dns_lookup']):
-            nmap_arguments += " -R"
 
         # nmap UDP scan requires sudo, setting it to true
         # Assume this will prompt the user to enter their password?
@@ -275,11 +273,11 @@ def perform_nmap_udp_scan(target, tool_arguments):
             print(results)
             return nm
         else:
-            logger.error("Nmap UDP scan error!")
+            logger.error("[-] Nmap UDP scan error!")
             return False
 
     else:
-        logger.warning("nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
+        logger.warning("[!] Nmap is either not installed or is not in your $PATH. Skipping nmap port scan.")
         return False
 
 
@@ -295,7 +293,7 @@ def perform_sshscan_scan(target, ssh_port=22):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
-            logger.error("[!] Docker is installed but not running. Skipping ssh_scan scan.")
+            logger.error("[-] Docker is installed but not running. Skipping ssh_scan scan.")
             return False
 
         # Clean up containers with the same name which may be leftovers
@@ -337,13 +335,13 @@ def perform_sshscan_scan(target, ssh_port=22):
         return p.returncode
 
     else:
-        logger.warning("Either Docker or ssh_scan is either not installed or is not in your $PATH. Skipping ssh_scan scan.")
+        logger.warning("[!] Either Docker or ssh_scan is either not installed or is not in your $PATH. Skipping ssh_scan scan.")
         return False
 
 
-def perform_nessus_scan(target, tool_arguments):
+def perform_nessus_scan(target):
 
-    logger.info("[+] Attempting to run a Nessus scan...")
+    logger.info("[+] Attempting to run Nessus scan on the target...")
     # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
     try:
         client = TenableIOClient()
@@ -352,7 +350,7 @@ def perform_nessus_scan(target, tool_arguments):
         nessus_scan.launch().wait_or_cancel_after(60) 
         nessus_scan.download(target[0] + '.nessus', nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
     except:
-        logger.warning("Nessus scan could not run. Make sure you have provided API keys to communicate with Tenable.io.")
+        logger.warning("[!] Nessus scan could not run. Make sure you have provided API keys to communicate with Tenable.io.")
         return False
 
     return True
@@ -379,7 +377,7 @@ def perform_httpobs_scan(target):
             p.wait()
             return p.returncode
         else:
-            logger.warning("HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
+            logger.warning("[!] HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
             return False
 
 
@@ -404,7 +402,7 @@ def perform_tlsobs_scan(target):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
-            logger.error("[!] Docker is installed but not running. Skipping TLS Observatory scan.")
+            logger.error("[-] Docker is installed but not running. Skipping TLS Observatory scan.")
             return False
         # Clean up containers with the same name which may have left
         try:
@@ -428,7 +426,7 @@ def perform_tlsobs_scan(target):
         return True
 
     else:
-        logger.warning("Either Docker or TLS Observatory or go is either not installed or is not in your $PATH. Skipping TLS Observatory scan.")
+        logger.warning("[!] Either Docker or TLS Observatory or go is either not installed or is not in your $PATH. Skipping TLS Observatory scan.")
         return False
 
 
@@ -463,7 +461,7 @@ def perform_directory_bruteforce(target, wordlist):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
-            logger.error("[!] Docker is installed but not running. Skipping directory brute-force scan.")
+            logger.error("[-] Docker is installed but not running. Skipping directory brute-force scan.")
             return False
 
         # Clean up containers with the same name which may be left-overs
@@ -493,7 +491,7 @@ def perform_directory_bruteforce(target, wordlist):
         #return p.returncode
         
     else:
-        logger.warning("Directory brute-force could not be performed. Skipping. Please perform manually.")
+        logger.warning("[!] Directory brute-force could not be performed. Skipping, perform it manually.")
         return False
 
 
@@ -514,7 +512,7 @@ def perform_zap_scan(target, tool_arguments):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
-            logger.error("[!] Docker is installed but not running. Skipping ZAP scan.")
+            logger.error("[-] Docker is installed but not running. Skipping ZAP scan.")
             return False
 
         # Clean up containers with the same name which may have left
@@ -542,7 +540,7 @@ def perform_zap_scan(target, tool_arguments):
         return True
 
     else:
-        logger.warning("ZAP scan relies on Docker, but Docker is not installed or is not in your $PATH. Skipping ZAP scan.")
+        logger.warning("[!] ZAP scan relies on Docker, but Docker is not installed or is not in your $PATH. Skipping ZAP scan.")
         return False
 
 
@@ -555,26 +553,31 @@ def main():
     global args
 
     args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
-    'verbose_output': False, 'force_dns_lookup': False}
+    'verbose_output': False, 'quiet_run': False}
 
     # Default wordlist
     wordlist = "/usr/share/wordlists/dirb/common.txt"
 
     # Parse the command line
-    parser = argparse.ArgumentParser(usage='%(prog)s [options] target')
-    parser.add_argument('target', help='host(s) to scan - this could be an "\
-    IP address/range, subnet mask notation, FQDN or a hostname')
-    parser.add_argument('--safe-scan', action='store_true', help='Use this "\
-    flag on production targets')
-    parser.add_argument('-w', action='store_true', help='Perform a web app "\
-    scan additionally (dirb and ZAP)')
+    parser = argparse.ArgumentParser(usage='%(prog)s [options] target', description="Sequentially run a number of\
+     tasks to perform a vulnerability assessment on a target.")
+    argument_group = parser.add_mutually_exclusive_group()
+    argument_group.add_argument('-v', '--verbose', action='store_true', help='increase'\
+    ' tool verbosity', default=False)
+    argument_group.add_argument('-q', '--quiet', action='store_true', help='quiet run, '\
+    'show almost no output', default=False)
+    # target is a positional argument, must be specifieds
+    parser.add_argument('target', help='host(s) to scan - this could be an \
+    IP address, FQDN or a hostname')
+    parser.add_argument('--safe-scan', action='store_true', help='use this \
+    flag on production targets', default=False)
+    parser.add_argument('--web-scan', action='store_true', help='perform a web app \
+    scan additionally (ZAP and directory brute-forcing)', default=False)
     parser.add_argument('-x',
                         action='store_true',
-                        help='Compress all tool outputs into a single file')
-    parser.add_argument('-v', '--verbose', action='store_true', help='display'\
-    ' progress indicator')
-    parser.add_argument('-r', action='store_true', help='Force perform'\
-    ' a DNS lookup')
+                        help='compress all tool outputs into a single file', default=False)
+    parser.add_argument('-w', dest='<wordlist>', action='store', help='specify\
+     location of a custom wordlist for directory brute-forcing')
 
     args = parser.parse_args()
 
@@ -595,7 +598,7 @@ def main():
         if args.safe_scan:
             args_dict['safe_scan'] = True
 
-        if args.w or target_OK[1] == 'URL':
+        if args.web_scan or target_OK[1] == 'URL':
             args_dict['web_app_scan'] = True
             tasklist.append('web-app-scan')
 
@@ -604,9 +607,13 @@ def main():
 
         if args.verbose:
             args_dict['verbose_output'] = True
+            # In verbose more we shall show DEBUG or more severe
+            coloredlogs.set_level(level='DEBUG')
 
-        if args.r:
-            args_dict['force_dns_lookup'] = True
+        if args.quiet:
+            args_dict['quiet_run'] = True
+            # In quiet mode we shall only show ERROR or more severe
+            coloredlogs.set_level(level='ERROR')
 
         # Let's start running the tasks...
 
@@ -616,7 +623,7 @@ def main():
             if 'tcp' in task:
                 # if (target_OK[1] != 'URL'):
                     # Run nmap TCP scan
-                    nmap_tcp_results = perform_nmap_tcp_scan(target_OK, args_dict)
+                    nmap_tcp_results = perform_nmap_tcp_scan(target_OK)
                 
                     if (nmap_tcp_results):
                         # if ssh is exposed, run SSH scan...
@@ -644,7 +651,7 @@ def main():
                                             ssh_port = port
                                             perform_sshscan_scan(target_ip, ssh_port)
                             if (not ssh_found):
-                                logger.info("SSH service not identified on \"" + target_OK[0] + "\", skipping SSH scan.")
+                                logger.info("[+] SSH service not identified on \"" + target_OK[0] + "\", skipping SSH scan.")
 
                         else:   # Means we have IP address(es)
                             if (target_OK[0].count(' ') >= 0):
@@ -666,17 +673,17 @@ def main():
                                                     ssh_port = port
                                                     perform_sshscan_scan(ip, ssh_port)
                                     if (not ssh_found):
-                                        logger.info("SSH service not identified on \"" + ip + "\", skipping SSH scan.")
+                                        logger.info("[+] SSH service not identified on \"" + ip + "\", skipping SSH scan.")
                     else:  # Something wrong with TCP port scan
-                        logger.warning("Unable to run TCP port scan. Make sure the target is reachable, or run the scan manually.")
+                        logger.warning("[!] Unable to run TCP port scan. Make sure the target is reachable, or run the scan manually.")
 
             if 'udp' in task:
                 # Run nmap UDP scan
-                # nmap_udp_results = perform_nmap_udp_scan(target_OK, args_dict)
+                # nmap_udp_results = perform_nmap_udp_scan(target_OK)
                 print("AAA")
             # if 'nessus' in task:
                 # Run nessus scan
-                # perform_nessus_scan(target_OK, args_dict)
+                # perform_nessus_scan(target_OK)
             if 'web' in task:
                 # Run HTTP Observatory scan
                 # httpobs_scan_results = perform_httpobs_scan(target_OK)
@@ -688,7 +695,8 @@ def main():
                 directory_scan_results = perform_directory_bruteforce(target_OK, wordlist)
 
     else:
-        logger.error("Unrecognised target(s) specified. Targets must be an IP address/range, subnet mask notation, FQDN or a hostname")
+        logger.critical("[X] Unrecognised target(s) specified. Targets must be \
+        an IP address/range, subnet mask notation, FQDN or a hostname.")
         sys.exit(-1)
 
 
