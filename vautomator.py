@@ -25,18 +25,25 @@ from httpobs.scanner.local import scan
 
 # TODO: 
 # 1) Make ZAP work - DONE
-# 2) Make dirb work - !!!
+# 2) Make dirb work - DONE
 # 3) Introduce exception handling - DONE
 # 4) Clean up argparse - DONE
 # 5) Add debug/verbose flag and output - DONE
 # 6) Fix docker copy stuff (assign tool results to a variable) - DONE
-# 7) Make it so it does not require user interaction (i.e. password prompt etc.)
+# 7) Make it so it does not require user interaction (i.e. password prompt etc.) - DONE
 # 8) Change log format, clean up "prints" - DONE
+# 9) Prepare requirements.txt and README.md - in readme include what the tool currently does, and future plans
+# 10) Write tests
 
 logger = logging.getLogger(__name__)
 # Default logging level is INFO
 coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
 fmt='[%(hostname)s] %(asctime)s %(levelname)s %(message)s')
+
+
+def checkUserPrivilege():
+    # The script needs sudo rights, check if the user needs password on sudo
+    return (subprocess.call(['sudo', '-n', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
 
 # Various helper functions are defined first
@@ -253,7 +260,8 @@ def perform_nmap_tcp_scan(target):
 def perform_nmap_udp_scan(target):
     # Check to see if nmap is installed
     logger.info("[+] Attempting to run Nmap UDP scan...")
-    logger.warning("[!] Note: UDP scan requires sudo. You will be prompted for your local account password.")
+    if (checkUserPrivilege()):
+        logger.info("[+] Note: UDP scan requires sudo. You will be prompted for your local account password.")
 
     if (is_nmap_installed()):
         # Currently the nmap UDP scan ports are known. Therefore will hardcode them here.
@@ -440,8 +448,8 @@ def perform_directory_bruteforce(target, wordlist):
     # hours to finish. Also, based on what's available on the system, we are
     # running different tools. For instance, if go & gobuster installed, we
     # use that. If not, we check if dirb is already installed. If not that
-    # either, then we use attempt to download kali-linux docker image, and
-    # run dirb off that (woah!)
+    # either, then we use attempt to download Metasploit Framework docker
+    # image, and run module "scanner/http/dir_scanner" off that (woah!)
 
     logger.info("[+] Attempting to run directory brute-forcing on the target URL...")
     logger.info("[+] This may take a while, go have lunch or something.")
@@ -462,7 +470,9 @@ def perform_directory_bruteforce(target, wordlist):
         return p.returncode
 
     elif (is_docker_installed()):
-        logger.info("[+] Neither gobuster nor dirb is found locally, downloading Kali Linux docker image...")
+        logger.info("[+] Neither gobuster nor dirb is found locally, resorting to Metasploit docker image...")
+        domain = urlparse(target[0]).netloc
+
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
@@ -471,24 +481,27 @@ def perform_directory_bruteforce(target, wordlist):
 
         # Clean up containers with the same name which may be left-overs
         try:
-            docker_client.remove_container("kali-container")
+            docker_client.remove_container("msf-container")
         except docker.errors.APIError as ContainerNotExistsError:
-            # Log for debug, change pass later
-            pass
+            logger.warning("[!] No container with the same name already exists, nothing to remove.")
     
-        dirb_command = "dirb " + target[0] + " " + wordlist + " -f -w -r -S -o " + target[0] + "__dirb_scan.txt"
+        msfmodule = "auxiliary/scanner/http/dir_scanner"
+        msfcommand = './msfconsole -x "use ' + msfmodule + '; set RHOSTS ' + domain +\
+         '; set RPORT 443; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto; run"'
         # Check if image exists first
         try:
-            docker_client.inspect_image('kalilinux/kali-linux-docker')
+            docker_client.inspect_image('metasploitframework/metasploit-framework')
         except docker.errors.APIError as ImageNotExistsError:
-            docker_client.pull('kalilinux/kali-linux-docker')
+            logger.info("[+] Metasploit container image not found locally, downloading...")
+            docker_client.pull('metasploitframework/metasploit-framework')
 
-        container = docker_client.create_container('kalilinux/kali-linux-docker', dirb_command, name="kali-container")
+        container = docker_client.create_container('metasploitframework/metasploit-framework', msfcommand, name="msf-container")
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         # Get the container logs anyway in case the tool did not run due to an error etc.
         # Need to do something with this
-        kali_logs = docker_client.logs(container.get('Id'))
+        msf_logs = docker_client.logs(container.get('Id'))
+        print(msf_logs)
         return True
 
         # Potential OS command injection venue here?
@@ -554,7 +567,7 @@ def sanitise_shell_command(command):
 
 
 def main():
-
+    
     global args
 
     args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
@@ -612,7 +625,7 @@ def main():
 
         if args.verbose:
             args_dict['verbose_output'] = True
-            # In verbose more we shall show DEBUG or more severe
+            # In verbose more we shall show DEBUG messages and more
             coloredlogs.install(level='DEBUG', logger=logger, reconfigure=True)
 
         if args.quiet:
@@ -684,18 +697,17 @@ def main():
 
             if 'udp' in task:
                 # Run nmap UDP scan
-                # nmap_udp_results = perform_nmap_udp_scan(target_OK)
-                print("AAA")
+                nmap_udp_results = perform_nmap_udp_scan(target_OK)
             # if 'nessus' in task:
                 # Run nessus scan
                 # perform_nessus_scan(target_OK)
             if 'web' in task:
                 # Run HTTP Observatory scan
-                # httpobs_scan_results = perform_httpobs_scan(target_OK)
+                httpobs_scan_results = perform_httpobs_scan(target_OK)
                 # Run TLS Observatory scan
-                # tlsobs_scan_results = perform_tlsobs_scan(target_OK)
+                tlsobs_scan_results = perform_tlsobs_scan(target_OK)
                 # Run ZAP scan(s)
-                # zap_scan_results = perform_zap_scan(target_OK, args_dict)
+                zap_scan_results = perform_zap_scan(target_OK, args_dict)
                 # Run dirb scan
                 directory_scan_results = perform_directory_bruteforce(target_OK, wordlist)
 
