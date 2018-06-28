@@ -21,16 +21,9 @@ from tenable_io.exceptions import TenableIOApiException
 from httpobs.scanner.local import scan
 
 # TODO: 
-# 1) Make ZAP work - DONE
-# 2) Make dirb work - DONE
-# 3) Introduce exception handling - DONE
-# 4) Clean up argparse - DONE
-# 5) Add debug/verbose flag and output - DONE
-# 6) Fix docker copy stuff (assign tool results to a variable) - DONE
-# 7) Make it so it does not require user interaction (i.e. password prompt etc.) - DONE
-# 8) Change log format, clean up "prints" - DONE
-# 9) Prepare requirements.txt and README.md - in readme include what the tool currently does, and future plans
-# 10) Write tests
+# 1) Write tests
+# 2) Improve main function
+# 3) Implement all argument functionality (i.e. compress)
 
 logger = logging.getLogger(__name__)
 # Default logging level is INFO
@@ -46,7 +39,7 @@ def checkUserPrivilege():
 # Various helper functions are defined first
 def is_valid_hostname(hostname):
     if hostname[-1] == ".":
-        # strip exactly one dot from the right, if present
+        # Strip exactly one dot from the right, if present
         hostname = hostname[:-1]
     if len(hostname) > 253:
         return False
@@ -83,7 +76,7 @@ def is_valid_ip(ip_notation):
     if (is_valid_ipv4(ip_notation) or is_valid_ipv6(ip_notation)):
         if ('/' in ip_notation):
             # The entered IP is CIDR notation
-            # let's convert it into a string of sequential IPs
+            # Let's convert it into a string of sequential IPs
             for ip in ip_notation:
                 expanded_ip = ip + " "
             return expanded_ip      # A string containing IP addresses separated by a space
@@ -226,8 +219,6 @@ def perform_nmap_tcp_scan(target):
     logger.info("[+] Attempting to run Nmap TCP scan...")
 
     if (is_nmap_installed()):
-        # Currently the nmap TCP scan parameters are known. Therefore will hardcode them here.
-        # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
         domain = target[0]
@@ -242,7 +233,10 @@ def perform_nmap_tcp_scan(target):
         
         results = nm.scan(domain, arguments=nmap_arguments, sudo=False)
         if (target_ip == "".join(nm.all_hosts())):
-            # Make this write to file before return
+            # This output we should send it somewhere, for now logging to a file
+            nmap_tcp_file = open(domain + '__nmap_tcp.json', 'w+')
+            nmap_tcp_file.write(str(results))
+            # Printing to screen if verbose
             logger.debug("Nmap TCP scan output:" + str(results))
             return nm
         else:
@@ -255,14 +249,15 @@ def perform_nmap_tcp_scan(target):
 
 
 def perform_nmap_udp_scan(target):
-    # Check to see if nmap is installed
     logger.info("[+] Attempting to run Nmap UDP scan...")
+
+    # Nmap UDP scans require sudo, check here if the user can sudo passwordless
     if (checkUserPrivilege()):
         logger.info("[+] Note: UDP scan requires sudo. You will be prompted for your local account password.")
-
+    
+    # Check to see if nmap is installed
     if (is_nmap_installed()):
         # Currently the nmap UDP scan ports are known. Therefore will hardcode them here.
-        # TODO: Parametrise these options for more flexibility in the future
         # Using python-nmap package here
 
         domain = target[0]
@@ -272,17 +267,21 @@ def perform_nmap_udp_scan(target):
         # Get target's resolved IP using system DNS
         target_ip = socket.gethostbyname(domain)
 
-        udp_ports = "17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960"
+        udp_ports = "17,19,53,67,68,123,137,138,139,\
+        161,162,500,520,646,1900,3784,3785,5353,27015,\
+        27016,27017,27018,27019,27020,27960"
 
         nm = nmap.PortScanner()
         nmap_arguments = '-v -Pn -sU -sV --open -T4 --system-dns'
 
         # nmap UDP scan requires sudo, setting it to true
-        # Assume this will prompt the user to enter their password?
         results = nm.scan(domain, ports=udp_ports, arguments=nmap_arguments, sudo=True)
         if (target_ip == "".join(nm.all_hosts())):
-            # Make this write to file before return
-            logger.debug("Nmap UDP scan output: " + results)
+            # This output we should send it somewhere, for now logging to a file
+            nmap_udp_file = open(domain + '__nmap_udp.json', 'w+')
+            nmap_udp_file.write(str(results))
+            # Printing to screen if verbose
+            logger.debug("Nmap UDP scan output: " + str(results))
             return nm
         else:
             logger.error("[-] Nmap UDP scan error!")
@@ -295,12 +294,13 @@ def perform_nmap_udp_scan(target):
 
 def perform_sshscan_scan(target, ssh_port=22):
     # Since we are already utilising Docker for other tasks,
-    # will use Docker here as well
+    # we will use Docker here as well.
     # Note that target parameter here is NOT a tuple
     
     logger.info("[+] Attempting to run ssh_scan as an SSH service was identified on target...")
     sshport = ssh_port.__str__()
 
+    # Check if Docker is installed
     if (is_docker_installed()):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
@@ -309,42 +309,35 @@ def perform_sshscan_scan(target, ssh_port=22):
             return False
 
         # Clean up containers with the same name which may be leftovers
+        # from the last time this tool was run
         try:
-            docker_client.remove_container("sshscan-container")
+            docker_client.remove_container('sshscan-container')
         except docker.errors.APIError as ContainerNotExistsError:
-            # Log for debug, change pass later
-            pass
+            logger.warning("[!] No container with the same name already exists, nothing to remove.")
         # Check if image exists first
         try:
             docker_client.inspect_image('mozilla/ssh_scan')
         except docker.errors.APIError as ImageNotExistsError:
             docker_client.pull('mozilla/ssh_scan')
 
-        container = docker_client.create_container('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -t ' + target, name='sshscan-container')
+        sshscan_cmd = '/app/bin/ssh_scan -p ' + sshport + ' -t ' + target
+
+        container = docker_client.create_container('mozilla/ssh_scan', sshscan_cmd, name='sshscan-container')
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         sshscan_output = docker_client.logs(container.get('Id'))
-        # This tlsobs_output we should send it somewhere, for now logging to a file
+        # This output, we should send it somewhere, for now logging to a file in the current directory
         outfile = open(target + '__sshscan.json', 'w+')
-        outfile.write(str(sshscan_output, 'utf-8'))
+        outfile.write(str(sshscan_output))
         return True
-
-        # docker_client.containers.run('mozilla/ssh_scan', '/app/bin/ssh_scan -p' + sshport + ' -o /tmp/' + target + '__sshscan.json -t ' + target)
-        # # Copy the resulting file back to local system, same directory
-        # container_name = docker_client.containers.list(filters={'ancestor': 'mozilla/ssh_scan'}, limit=1)[0].name
-        # # Potential OS command injection venue here?
-        # p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target + '__sshscan.json .', stdin=None, stdout=None, stderr=None, shell=True)
-        # return True
 
     # Here only testing if it may have been installed as a Ruby gem
     elif (is_sshscan_installed()):
-        cmd = "ssh_scan -p " + sshport + " -o " + target + "__sshscan.json -t " + target
-        sanitised_cmd = sanitise_shell_command(cmd)
-        # TODO: Is there a way to run this without shell=True ?
-        p = subprocess.Popen(sanitised_cmd, shell=True)
-        p.wait()
-
-        return p.returncode
+        tool_path = find_executable('ssh_scan')
+        sshscan_out_handler = open(target + "__ssh_scan.json", "w+")
+        proc = subprocess.call([tool_path, "-p", sshport, "-t", target],
+                        shell=False, stdout=sshscan_out_handler, stderr=subprocess.DEVNULL)
+        return proc
 
     else:
         logger.warning("[!] Either Docker or ssh_scan is either not installed or is not in your $PATH. Skipping ssh_scan scan.")
@@ -356,20 +349,32 @@ def perform_nessus_scan(target):
     logger.info("[+] Attempting to run Nessus scan on the target...")
     # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
     try:
+        # According to documentation TenableIO client can be initialised
+        # in a number of ways. I choose here the environment variable option.
+        # On the same tty, the user needs to set TENABLEIO_ACCESS_KEY and
+        # TENABLEIO_SECRET_KEY variables. I prefer this over storing keys
+        # in a config file on disk
         client = TenableIOClient()
+        
+        # Running basic network scan
         nessus_scan = client.scan_helper.create(name='Scan_for_ ' + target[0], text_targets=target[0], template='basic')
+
         # Let's allow up to 60 minutes for the scan to run and finish
-        nessus_scan.launch().wait_or_cancel_after(60) 
+        nessus_scan.launch().wait_or_cancel_after(60)
+        # Downloading the results in .nessus format
+        # We will likely need to post this to somewhere else too
         nessus_scan.download(target[0] + '.nessus', nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
-    except:
-        logger.warning("[!] Nessus scan could not run. Make sure you have provided API keys to communicate with Tenable.io.")
+    except TenableIOApiException as TIOException:
+        logger.warning("[!] Nessus scan could not run. Make sure you have\
+         provided API keys to communicate with Tenable.io.")
         return False
 
     return True
 
 
-# There are 2 ways to implement this, first I will check if the CLI version of observatory is available
-# If it is, use that. If not, try to run the scan programmatically.
+# There are 2 ways to implement this: first attempt to run the scan
+# programmatically. If there is an error/exception, try to run it
+# with the standalone observatory binary.
 def perform_httpobs_scan(target):
 
     logger.info("[+] Attempting to run HTTP Observatory scan...")
@@ -382,11 +387,11 @@ def perform_httpobs_scan(target):
     except Exception as httpobsError:
         tool_path = find_executable('observatory')
         if (is_observatory_installed()):
-            cmd = tool_path + " --format json -z --rescan " + domain + " > " + domain + "__httpobs_scan.json"
-            sanitised_cmd = sanitise_shell_command(cmd)
-            p = subprocess.Popen(sanitised_cmd, shell=True)
-            p.wait()
-            return p.returncode
+            # We'd like to capture the tool output and save to a file
+            httpobs_out_handler = open(domain + "__httpobs_scan.json", "w+")
+            proc = subprocess.call([tool_path, "--format json", "-z", "--rescan", domain],
+                            shell=False, stdout=httpobs_out_handler, stderr=subprocess.DEVNULL)
+            return proc
         else:
             logger.warning("[!] HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
             return False
@@ -400,12 +405,12 @@ def perform_tlsobs_scan(target):
     tool_path = find_executable('tlsobs')
 
     if (is_TLSobservatory_installed()):
-        cmd = tool_path + " -r " + domain + " > " + domain + "__tlsobs_scan.json"
-        sanitised_cmd = sanitise_shell_command(cmd)
-        p = subprocess.Popen(sanitised_cmd, shell=True)
-        p.wait()
+        # We'd like to capture the tool output and save to a file
+        tlsobs_out_handler = open(domain + "__tlsobs_scan.json", "w+")
+        proc = subprocess.call([tool_path, "-r", "-raw", domain],
+                        shell=False, stdout=tlsobs_out_handler, stderr=subprocess.DEVNULL)
 
-        return p.returncode
+        return proc
 
     # This tool is also available as a docker image
     elif (is_docker_installed()):
@@ -414,12 +419,12 @@ def perform_tlsobs_scan(target):
         except Exception as DockerNotRunningError:
             logger.error("[-] Docker is installed but not running. Skipping TLS Observatory scan.")
             return False
-        # Clean up containers with the same name which may have left
+        # Clean up containers with the same name which may be leftovers
+        # from the last time this tool was run
         try:
             docker_client.remove_container("tlsobs-container")
         except docker.errors.APIError as ContainerNotExistsError:
-            # Log for debug, change pass later
-            pass
+            logger.warning("[!] No container with the same name already exists, nothing to remove.")
         # Check if image exists first
         try:
             docker_client.inspect_image('mozilla/tls-observatory')
@@ -432,43 +437,47 @@ def perform_tlsobs_scan(target):
         tlsobs_output = docker_client.logs(container.get('Id'))
         # This tlsobs_output we should send it somewhere, for now logging to a file
         outfile = open(domain + '__tlsobs_scan.json', 'w+')
-        outfile.write(str(tlsobs_output, 'utf-8'))
+        outfile.write(str(tlsobs_output))
         return True
 
     else:
-        logger.warning("[!] Either Docker or TLS Observatory or go is either not installed or is not in your $PATH. Skipping TLS Observatory scan.")
+        logger.warning("[!] Either Docker or TLS Observatory or go is not installed or is not in your $PATH. Skipping TLS Observatory scan.")
         return False
 
 
 def perform_directory_bruteforce(target, wordlist):
-    # TODO: This is a terrible implementation. The tools here take approx. 2
-    # hours to finish. Also, based on what's available on the system, we are
-    # running different tools. For instance, if go & gobuster installed, we
-    # use that. If not, we check if dirb is already installed. If not that
-    # either, then we use attempt to download Metasploit Framework docker
-    # image, and run module "scanner/http/dir_scanner" off that (woah!)
+    # TODO: This is a non-ideal implementation to say the least. The tools
+    # here take approx. 2 hours to finish. Also, based on what's available
+    # on the system, we are running different tools. For instance, if go
+    # & gobuster installed, we use that. If not, we check if dirb is already
+    # installed. If not that either, we then use attempt to download
+    # Metasploit Framework docker image, and run the module
+    # "scanner/http/dir_scanner" off that (woah!)
 
     logger.info("[+] Attempting to run directory brute-forcing on the target URL...")
     logger.info("[+] This may take a while, go have lunch or something.")
+    domain = urlparse(target[0]).netloc
 
     # Check if go is installed
     if (is_go_installed() and is_gobuster_installed()):
-        cmd = "gobuster -u " + target[0] + " -w " + wordlist + " -o " + target[0] + "__gobuster_scan.txt"
-        sanitised_cmd = sanitise_shell_command(cmd)
-        p = subprocess.Popen(sanitised_cmd, shell=True)
-        p.wait()
-        return p.returncode
+        tool_path = find_executable('gobuster')
+        # We'd like to capture the tool output and save to a file
+        gobuster_out_handler = open(domain + "__gobuster_scan.txt", "w+")
+        proc = subprocess.call([tool_path, "-u " + target[0], "-w " + wordlist],
+                        shell=False, stdout=gobuster_out_handler, stderr=subprocess.DEVNULL)
+
+        return proc
     
     elif (is_dirb_installed()):
-        cmd = "dirb " + target[0] + " " + wordlist + " -f -w -r -S -o " + target[0] + "__dirb_scan.txt"
-        sanitised_cmd = sanitise_shell_command(cmd)
-        p = subprocess.Popen(sanitised_cmd, shell=True)
-        p.wait()
-        return p.returncode
+        tool_path = find_executable('dirb')
+        dirb_out_handler = open(domain + "__dirb_scan.txt", "w+")
+        proc = subprocess.call([tool_path, target[0], wordlist, "-f", "-w", "-r", "-S"],
+                        shell=False, stdout=dirb_out_handler, stderr=subprocess.DEVNULL)
+
+        return proc
 
     elif (is_docker_installed()):
         logger.info("[+] Neither gobuster nor dirb is found locally, resorting to Metasploit docker image...")
-        domain = urlparse(target[0]).netloc
 
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
@@ -476,7 +485,8 @@ def perform_directory_bruteforce(target, wordlist):
             logger.error("[-] Docker is installed but not running. Skipping directory brute-force scan.")
             return False
 
-        # Clean up containers with the same name which may be left-overs
+        # Clean up containers with the same name which may be leftovers
+        # from the last time this tool was run
         try:
             docker_client.remove_container("msf-container")
         except docker.errors.APIError as ContainerNotExistsError:
@@ -485,6 +495,7 @@ def perform_directory_bruteforce(target, wordlist):
         msfmodule = "auxiliary/scanner/http/dir_scanner"
         msfcommand = './msfconsole -x "use ' + msfmodule + '; set RHOSTS ' + domain +\
          '; set RPORT 443; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto; run"'
+        
         # Check if image exists first
         try:
             docker_client.inspect_image('metasploitframework/metasploit-framework')
@@ -496,14 +507,13 @@ def perform_directory_bruteforce(target, wordlist):
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         # Get the container logs anyway in case the tool did not run due to an error etc.
-        # Need to do something with this
         msf_logs = docker_client.logs(container.get('Id'))
-        print(msf_logs)
+        # This output we should send it somewhere, for now logging to a file
+        msf_file = open(domain + '__directory_brute.txt', 'w+')
+        msf_file.write(str(msf_logs))
+        # Printing to screen if verbose
+        logger.debug("Directory brute-force output: " + str(msf_logs))
         return True
-
-        # Potential OS command injection venue here?
-        # p = subprocess.Popen('docker cp ' + container_name + ':/tmp/' + target[0] + '__dirb_scan.txt .', stdin=None, stdout=None, stderr=None, shell=True)
-        #return p.returncode
         
     else:
         logger.warning("[!] Directory brute-force could not be performed. Skipping, perform it manually.")
@@ -530,26 +540,32 @@ def perform_zap_scan(target, tool_arguments):
             logger.error("[-] Docker is installed but not running. Skipping ZAP scan.")
             return False
 
-        # Clean up containers with the same name which may have left
+        # Clean up containers with the same name which may be leftovers
+        # from the last time this tool was run
         try:
             docker_client.remove_container("ZAP-container")
         except docker.errors.APIError as ContainerNotExistsError:
-            # Log for debug, change pass later
-            pass
+            logger.warning("[!] No container with the same name already exists, nothing to remove.")
         # Check if image exists first
         try:
             docker_client.inspect_image('owasp/zap2docker-weekly')
         except docker.errors.APIError as ImageNotExistsError:
             docker_client.pull('owasp/zap2docker-weekly')
 
+        # ZAP requires certain paths to be mounted if outputting to a file
         container = docker_client.create_container('owasp/zap2docker-weekly', zap_command, name="ZAP-container",
         volumes=['/zap/wrk'], host_config=docker_client.create_host_config(binds=[
         os.getcwd() + ':/zap/wrk/:rw']))
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         # Get the container logs anyway in case the tool did not run due to an error etc.
-        # Need to do something with this
         zap_logs = docker_client.logs(container.get('Id'))
+        # This output we should send it somewhere, for now logging to a file
+        zap_file = open(domain + '__ZAP_logs.json', 'w+')
+        zap_file.write(str(zap_logs))
+        # Printing to screen if verbose
+        logger.debug("ZAP output: " + str(zap_logs))
+        
         if "ERROR" in zap_logs.__str__():
             logger.error("[-] ERROR in ZAP scan.")
         return True
@@ -559,14 +575,15 @@ def perform_zap_scan(target, tool_arguments):
         return False
 
 
+# Trying to minimise likelihood of OS command injection
+# into subprocess.popen calls
 def sanitise_shell_command(command):
     return shlex.split(shlex.quote(command))
 
 
 def main():
     
-    global args
-
+    # Tracking script arguments here, default values
     args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
     'verbose_output': False, 'quiet_run': False}
 
@@ -596,10 +613,10 @@ def main():
 
     args = parser.parse_args()
 
-    # Target validation happens here
+    # Target validation happens here. Target_OK here is a tuple.
+    # First index is either a boolean False, or a string of IP 
+    # address(es), or a hostname or a URL
     target_OK = validate_target(args.target)
-    # Target_OK here is a tuple now
-    # First index is either a boolean False, or a string of IP address(es), or a hostname or a URL
 
     if (target_OK[0]):
         # If target_OK is a tuple whose first element is not False, we can start running the tasks
@@ -615,14 +632,14 @@ def main():
 
         if args.web_scan or target_OK[1] == 'URL':
             args_dict['web_app_scan'] = True
-            tasklist.append('web-app-scan')
+            tasklist.append('webapp-scan')
 
         if args.x:
             args_dict['compress_output'] = True
 
         if args.verbose:
             args_dict['verbose_output'] = True
-            # In verbose more we shall show DEBUG messages and more
+            # In verbose mode we shall show messages starting from DEBUG severity
             coloredlogs.install(level='DEBUG', logger=logger, reconfigure=True)
 
         if args.quiet:
@@ -631,15 +648,12 @@ def main():
             coloredlogs.install(level='ERROR', logger=logger, reconfigure=True)
 
         # Let's start running the tasks...
-
         ssh_found = False
 
         for task in tasklist:
             if 'tcp' in task:
-                # if (target_OK[1] != 'URL'):
                     # Run nmap TCP scan
                     nmap_tcp_results = perform_nmap_tcp_scan(target_OK)
-                
                     if (nmap_tcp_results):
                         # if ssh is exposed, run SSH scan...
                         
@@ -655,13 +669,12 @@ def main():
                                 ssh_found = True
                                 perform_sshscan_scan(target_ip, 22)
                             else:
-                                # or ('ssh' in (nmap_tcp_results[target_ip].name or nmap_tcp_results[target_ip].product)):
-                                # Need to find the actual SSH port, in case it's not 22
+                                # Need to find the actual SSH port, in case it is not 22
                                 for proto in nmap_tcp_results[target_ip].all_protocols():
                                     lport = nmap_tcp_results[target_ip][proto].keys()
                                     for port in lport:
                                         banner = nmap_tcp_results[target_ip][proto][port]['product'] + "|" + nmap_tcp_results[target_ip][proto][port]['name']
-                                        if ('SSH' or 'ssh') in banner:
+                                        if 'ssh' in map(str.lower, banner):
                                             ssh_found = True
                                             ssh_port = port
                                             perform_sshscan_scan(target_ip, ssh_port)
@@ -677,27 +690,27 @@ def main():
                                         ssh_found = True
                                         perform_sshscan_scan(ip, 22)
                                     else:
-                                        # or ('ssh' in (nmap_tcp_results[ip].name or nmap_tcp_results[ip].product)):
                                         # Need to find the actual SSH port, in case it's not 22
                                         for proto in nmap_tcp_results[ip].all_protocols():
                                             lport = nmap_tcp_results[ip][proto].keys()
                                             for port in lport:
                                                 banner = nmap_tcp_results[ip][proto][port]['product'] + "|" + nmap_tcp_results[ip][proto][port]['name']
-                                                if ('SSH' or 'ssh') in banner:
+                                                if 'ssh' in map(str.lower, banner):
                                                     ssh_found = True
                                                     ssh_port = port
                                                     perform_sshscan_scan(ip, ssh_port)
                                     if (not ssh_found):
                                         logger.info("[+] SSH service not identified on \"" + ip + "\", skipping SSH scan.")
-                    else:  # Something wrong with TCP port scan
+                    else:
+                        # Something wrong with TCP port scan
                         logger.warning("[!] Unable to run TCP port scan. Make sure the target is reachable, or run the scan manually.")
 
             if 'udp' in task:
                 # Run nmap UDP scan
                 nmap_udp_results = perform_nmap_udp_scan(target_OK)
-            # if 'nessus' in task:
+            if 'nessus' in task:
                 # Run nessus scan
-                # perform_nessus_scan(target_OK)
+                perform_nessus_scan(target_OK)
             if 'web' in task:
                 # Run HTTP Observatory scan
                 httpobs_scan_results = perform_httpobs_scan(target_OK)
@@ -710,7 +723,7 @@ def main():
 
     else:
         logger.critical("[X] Unrecognised target(s) specified. Targets must be "\
-        "an IP address/range, subnet mask notation, FQDN or a hostname.")
+        "an IP address/range, FQDN or a hostname, or a URL.")
         sys.exit(-1)
 
 
