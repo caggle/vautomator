@@ -1,7 +1,7 @@
 # vautomator
 Iterative automation of common VA tasks using functional programming.
 
-Currently it "does the job", albeit inefficiently with many areas for improvements (see Issues).
+Currently it "does the job", albeit inefficiently with many areas for improvements.
 
 ## What it does
 
