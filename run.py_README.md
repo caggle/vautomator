@@ -11,4 +11,6 @@ docker run -v ${PWD}/results:/app/results -it vautomator:latest python /app/run.
 
 # Upload results to GDrive/BMO/S3 Bucket/ZIP/or whatever
 
-TBD
+results will be posted into ./results/INSERT_FQDN_NAME/...
+
+A tar.gz is also available in ./results/INSERT_FQDN_NAME.tar.gz for uploading to a bug for record keeping
