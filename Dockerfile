@@ -26,8 +26,8 @@ RUN cd /app/vendor/dirb222/ && \
 COPY ./run.py /app/run.py
 RUN chmod -x /app/run.py
 
-# Install and compile X
-
+# Install ssh_scan
+RUN gem install ssh_scan
 
 # Install and compile Y
 
