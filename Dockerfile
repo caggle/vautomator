@@ -7,7 +7,8 @@ RUN mkdir -p /app/results
 # Update deps and install make utils for compiling tools
 RUN apt-get update && \
     apt-get install -y build-essential && \
-    apt-get install -y make
+    apt-get install -y make && \
+    apt-get install -y curl
 
 # Install NMAP
 RUN apt-get install -y nmap

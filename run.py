@@ -1,6 +1,7 @@
 # A minimally viable automated work-flow of VA Automation that we can incrementally improve on...
 import sys
 import os
+import time
 
 # Get targeting info
 fqdn = sys.argv[1]
@@ -14,8 +15,6 @@ if "http" in fqdn:
   print("FQDN provided is not an FQDN, please use an FQDN (Example: foo.example.com)")
   exit(1) 
 
-#TODO: make this dependant on NMAP results/protocol fingerprints
-# In the mean time, just toggle and rebuild it, maybe we'll just take a URL as a seed? dunno.
 output_path = "/app/results/" + fqdn + "/"
 
 # Create a location to store our outputs
@@ -39,6 +38,13 @@ for line in lines:
   if (("Host:" in line) and ("Ports:" in line) and ("80/open/tcp" in line)):
     print("http is open, so we'll dirb it...")
     command = "/app/vendor/dirb222/dirb http://" + fqdn + "/ /app/vendor/dirb222/wordlists/common.txt -o /app/results/" + fqdn + "/http_dirb_common.txt"
+    os.system(command)
+  if (("Host:" in line) and ("Ports:" in line) and ("80/open/tcp" in line or "443/open/tcp" in line)):
+    print("http/https is open, so we'll observatory it...")
+    command = "curl -X POST -d '' https://http-observatory.security.mozilla.org/api/v1/analyze?host=" + fqdn + " > /app/results/" + fqdn + "/observatory.txt"
+    os.system(command)
+    print("Giving observatory some time to complete scan before grabbing results...")
+    time.sleep(20)
     os.system(command)
   if (("Host:" in line) and ("Ports:" in line) and ("22/open/tcp" in line)):
     print("ssh is open, so we'll ssh_scan it...")
