@@ -26,7 +26,7 @@ except:
 
 # Do procedure NMAP scans (save output to /app/results)
 os.system("nmap -v -Pn -sT -n --top-ports 1000 --open -T4 -oA " + output_path + "scan_tcp_" + fqdn + " " + fqdn)
-# os.system("nmap -v -Pn -sU -sV -n -p 17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960 --open -T4 -oA " + output_path + "scan_udp_" + fqdn + " " + fqdn)
+os.system("nmap -v -Pn -sU -sV -n -p 17,19,53,67,68,123,137,138,139,161,162,500,520,646,1900,3784,3785,5353,27015,27016,27017,27018,27019,27020,27960 --open -T4 -oA " + output_path + "scan_udp_" + fqdn + " " + fqdn)
 
 # Do procedure dirb/ssh scans (save output to directory outside container)
 nmap_tcp_gnmap_file = open("/app/results/" + fqdn + "/scan_tcp_" + fqdn + ".gnmap", "r")
