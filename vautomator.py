@@ -266,7 +266,7 @@ def perform_nmap_tcp_scan(target, outpath):
             nmap_tcp_file = open(os.path.join(outpath, domain + '__nmap_tcp.json'), 'w+')
             nmap_tcp_file.write(str(results))
             # Printing to screen if verbose
-            logger.debug("Nmap TCP scan output:" + json.dumps(results, indent=2))
+            logger.debug("Nmap TCP scan output:\n" + json.dumps(results, indent=2))
             return nm
         else:
             logger.error("[-] Nmap TCP scan error!")
@@ -311,7 +311,7 @@ def perform_nmap_udp_scan(target, outpath):
             nmap_udp_file = open(os.path.join(outpath, domain + '__nmap_udp.json'), 'w+')
             nmap_udp_file.write(str(results))
             # Printing to screen if verbose
-            logger.debug("Nmap UDP scan output: " + json.dumps(results, indent=2))
+            logger.debug("Nmap UDP scan output:\n" + json.dumps(results, indent=2))
             return nm
         else:
             logger.error("[-] Nmap UDP scan error!")
@@ -359,9 +359,12 @@ def perform_sshscan_scan(target, outpath, ssh_port=22):
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         sshscan_output = docker_client.logs(container.get('Id'))
+        formatted_output = sshscan_output.decode('utf-8')
         # This output, we should send it somewhere, for now logging to a file in the current directory
         outfile = open(os.path.join(outpath, domain_or_IP + '__sshscan.json'), 'w+')
-        outfile.write(str(sshscan_output))
+        outfile.write(formatted_output)
+        # Printing to screen if verbose
+        logger.debug("sshscan output:\n" + json.dumps(json.loads(formatted_output), indent=2))
         return True
 
     # Here only testing if it may have been installed as a Ruby gem
@@ -370,6 +373,7 @@ def perform_sshscan_scan(target, outpath, ssh_port=22):
         sshscan_out_handler = open(domain_or_IP + "__ssh_scan.json", "w+")
         proc = subprocess.call([tool_path, "-p", sshport, "-t", target],
                         shell=False, stdout=sshscan_out_handler, stderr=subprocess.DEVNULL)
+        # logger.debug("sshscan output: " + json.dumps(sshscan_out_handler, indent=2))
         return proc
 
     else:
@@ -420,7 +424,7 @@ def perform_httpobs_scan(target, outpath):
         httpobs_file = open(os.path.join(outpath, domain + '__httpobs_scan.json'), 'w+')
         httpobs_file.write(str(httpobs_result))
         # Printing to screen if verbose
-        logger.debug("HTTP Observatory output: " + httpobs_result)
+        logger.debug("HTTP Observatory scan output:\n" + json.dumps(httpobs_result, indent=2))
         return True
     except Exception as httpobsError:
         tool_path = find_executable('observatory')
@@ -429,6 +433,7 @@ def perform_httpobs_scan(target, outpath):
             httpobs_out_handler = open(os.path.join(outpath, domain + "__httpobs_scan.json"), "w+")
             proc = subprocess.call([tool_path, "--format json", "-z", "--rescan", domain],
                             shell=False, stdout=httpobs_out_handler, stderr=subprocess.DEVNULL)
+            # logger.debug("HTTP Observatory scan output: " + json.dumps(httpobs_out_handler, indent=2))
             return proc
         else:
             logger.warning("[!] HTTP Observatory is either not installed or is not in your $PATH. Skipping HTTP Observatory scan.")
@@ -447,6 +452,7 @@ def perform_tlsobs_scan(target, outpath):
         tlsobs_out_handler = open(os.path.join(outpath, domain + "__tlsobs_scan.json"), "w+")
         proc = subprocess.call([tool_path, "-r", "-raw", domain],
                         shell=False, stdout=tlsobs_out_handler, stderr=subprocess.DEVNULL)
+        # logger.debug("TLS Observatory scan output: " + json.dumps(tlsobs_out_handler, indent=2))
 
         return proc
 
@@ -473,9 +479,13 @@ def perform_tlsobs_scan(target, outpath):
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         tlsobs_output = docker_client.logs(container.get('Id'))
+        # tlsobs_output is bytes, need to conver to ASCII flat file
+        # Not that it is not JSON formatted
         # This tlsobs_output we should send it somewhere, for now logging to a file
-        outfile = open(os.path.join(outpath, domain + '__tlsobs_scan.json'), 'w+')
-        outfile.write(str(tlsobs_output))
+        outfile = open(os.path.join(outpath, domain + '__tlsobs_scan.txt'), 'w+')
+        outfile.write(tlsobs_output.decode('utf-8'))
+        # Printing to screen if verbose
+        logger.debug("TLS Observatory scan output:\n" + tlsobs_output.decode('utf-8'))
         return True
 
     else:
@@ -503,7 +513,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         gobuster_out_handler = open(os.path.join(outpath, domain + "__gobuster_scan.txt"), "w+")
         proc = subprocess.call([tool_path, "-u " + target[0], "-w " + wordlist],
                         shell=False, stdout=gobuster_out_handler, stderr=subprocess.DEVNULL)
-
+        # logger.debug("gobuster scan output: " + json.dumps(gobuster_out_handler, indent=2))
         return proc
     
     elif (is_dirb_installed()):
@@ -511,7 +521,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         dirb_out_handler = open(os.path.join(outpath, domain + "__dirb_scan.txt"), "w+")
         proc = subprocess.call([tool_path, target[0], wordlist, "-f", "-w", "-r", "-S"],
                         shell=False, stdout=dirb_out_handler, stderr=subprocess.DEVNULL)
-
+        # logger.debug("dirb scan output: " + json.dumps(dirb_out_handler, indent=2))
         return proc
 
     elif (is_docker_installed()):
@@ -529,11 +539,14 @@ def perform_directory_bruteforce(target, wordlist, outpath):
             docker_client.remove_container("msf-container")
         except docker.errors.APIError as ContainerNotExistsError:
             logger.notice("[*] No container with the same name already exists, nothing to remove.")
-    
+        
+        # TODO: This is broken, needs fixing (2 commands to run in the container)
+        wget_command = 'wget https://raw.githubusercontent.com/v0re/dirb/master/wordlists/common.txt -P /tmp'
         msfmodule = "auxiliary/scanner/http/dir_scanner"
         msfcommand = './msfconsole -x "use ' + msfmodule + '; set RHOSTS ' + domain +\
-         '; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto; run"'
-        
+         '; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto'\
+         '; set RPORT 443; set DICTIONARY /tmp/common.txt; run; exit"'
+
         # Check if image exists first
         try:
             docker_client.inspect_image('metasploitframework/metasploit-framework')
@@ -541,16 +554,19 @@ def perform_directory_bruteforce(target, wordlist, outpath):
             logger.notice("[*] Metasploit container image not found locally, downloading...")
             docker_client.pull('metasploitframework/metasploit-framework')
 
-        container = docker_client.create_container('metasploitframework/metasploit-framework', msfcommand, name="msf-container")
+        container = docker_client.create_container('metasploitframework/metasploit-framework', wget_command, name="msf-container")
         docker_client.start(container)
+        exec_id = docker_client.exec_create(container.get('Id'), msfcommand, stdout=True)
+        output = docker_client.exec_start(exec_id, stream=True)
         docker_client.wait(container.get('Id'))
+        print(output)
         # Get the container logs anyway in case the tool did not run due to an error etc.
         msf_logs = docker_client.logs(container.get('Id'))
         # This output we should send it somewhere, for now logging to a file
         msf_file = open(os.path.join(outpath, domain + '__directory_brute.txt'), 'w+')
-        msf_file.write(str(msf_logs))
+        msf_file.write(msf_logs.decode('utf-8'))
         # Printing to screen if verbose
-        logger.debug("Directory brute-force output: " + str(msf_logs))
+        logger.debug("Directory brute-force output:\n" + msf_logs.decode('utf-8'))
         return True
         
     else:
@@ -566,11 +582,11 @@ def perform_zap_scan(target, tool_arguments, outpath):
     if (is_docker_installed()):
         
         if (tool_arguments['full_scan']):
-            file_suffix = "__ZAP_full.json"
-            zap_command = "zap-full-scan.py -m 1 -T 5 -d -t " + target[0] + " -J " + domain + file_suffix
+            # file_suffix = "__ZAP_full.json"
+            zap_command = "zap-full-scan.py -m 1 -T 5 -d -t " + target[0]
         else:
-            file_suffix = "__ZAP_baseline.json"
-            zap_command = "zap-baseline.py -t " + target[0] + " -J " + domain + file_suffix
+            # file_suffix = "__ZAP_baseline.json"
+            zap_command = "zap-baseline.py -t " + target[0]
 
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
@@ -597,13 +613,15 @@ def perform_zap_scan(target, tool_arguments, outpath):
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         # TODO: Need to get the output file here
+        # If the below works, then we don't need a -J option in zap_command above
+
         # Get the container logs anyway in case the tool did not run due to an error etc.
         zap_logs = docker_client.logs(container.get('Id'))
         # This output we should send it somewhere, for now logging to a file
-        zap_file = open(domain + '__ZAP_logs.json', 'w+')
-        zap_file.write(str(zap_logs))
+        zap_file = open(domain + '__ZAP_logs.txt', 'w+')
+        zap_file.write(zap_logs.decode('utf-8'))
         # Printing to screen if verbose
-        logger.debug("ZAP output: " + str(zap_logs))
+        logger.debug("ZAP scan output:\n" + zap_logs.decode('utf-8'))
         
         # TODO: Change the logic here
         if "ERROR" in zap_logs.__str__():
@@ -618,6 +636,7 @@ def perform_zap_scan(target, tool_arguments, outpath):
 
 # Trying to minimise likelihood of OS command injection
 # into subprocess.popen calls
+# NOTE: Currently this function is not used
 def sanitise_shell_command(command):
     return shlex.split(shlex.quote(command))
 
@@ -633,7 +652,7 @@ def showScanSummary(task_dictionary):
         else:
             logger.error("[ :(] " + task + " failed to run. Please investigate or run manually.")
     
-    print("====== END OF SCAN ======\n")
+    print("====== END OF SCAN =======\n")
 
 
 def main():
