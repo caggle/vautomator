@@ -15,6 +15,7 @@ import socket
 import os
 import tarfile
 import time
+import json
 from distutils.spawn import find_executable
 from netaddr import valid_ipv4, valid_ipv6, IPNetwork
 from urllib.parse import urlparse
@@ -23,14 +24,12 @@ from tenable_io.client import TenableIOClient
 from tenable_io.exceptions import TenableIOApiException
 from httpobs.scanner.local import scan
 
-# TODO: 
-# 1) Write tests
 
 verboselogs.install()
 logger = logging.getLogger(__name__)
 # Default logging level is INFO
 coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
-fmt='[%(hostname)s] %(asctime)s %(levelname)s %(message)s')
+fmt='[%(hostname)s] %(asctime)s %(levelname)-8s %(message)s')
 
 
 def checkUserPrivilege():
@@ -59,8 +58,8 @@ def createOutputDirectory(target, output_dir):
         os.makedirs(final_path)
         return final_path
     except OSError as exception:
-        logger.warning("[!] Unable to create directory. Ensure a directory with"
-         "the same name does not already exist. Tool output will be saved in the"
+        logger.warning("[!] Unable to create directory. Ensure a directory with "
+         "the same name does not already exist. Tool output will be saved in the "
          "current directory")
         
         return False
@@ -267,7 +266,7 @@ def perform_nmap_tcp_scan(target, outpath):
             nmap_tcp_file = open(os.path.join(outpath, domain + '__nmap_tcp.json'), 'w+')
             nmap_tcp_file.write(str(results))
             # Printing to screen if verbose
-            logger.debug("Nmap TCP scan output:" + str(results))
+            logger.debug("Nmap TCP scan output:" + json.dumps(results, indent=2))
             return nm
         else:
             logger.error("[-] Nmap TCP scan error!")
@@ -312,7 +311,7 @@ def perform_nmap_udp_scan(target, outpath):
             nmap_udp_file = open(os.path.join(outpath, domain + '__nmap_udp.json'), 'w+')
             nmap_udp_file.write(str(results))
             # Printing to screen if verbose
-            logger.debug("Nmap UDP scan output: " + str(results))
+            logger.debug("Nmap UDP scan output: " + json.dumps(results, indent=2))
             return nm
         else:
             logger.error("[-] Nmap UDP scan error!")
@@ -326,10 +325,14 @@ def perform_nmap_udp_scan(target, outpath):
 def perform_sshscan_scan(target, outpath, ssh_port=22):
     # Since we are already utilising Docker for other tasks,
     # we will use Docker here as well.
-    # Note that target parameter here is NOT a tuple
     
     logger.info("[+] Attempting to run ssh_scan as an SSH service was identified on target...")
     sshport = ssh_port.__str__()
+
+    domain_or_IP = target[0]
+    if target[1] == 'URL':
+        domain_or_IP = urlparse(target[0]).netloc
+    sshscan_cmd = '/app/bin/ssh_scan -p ' + sshport + ' -t ' + domain_or_IP
 
     # Check if Docker is installed
     if (is_docker_installed()):
@@ -345,27 +348,26 @@ def perform_sshscan_scan(target, outpath, ssh_port=22):
             docker_client.remove_container('sshscan-container')
         except docker.errors.APIError as ContainerNotExistsError:
             logger.notice("[*] No container with the same name already exists, nothing to remove.")
+        
         # Check if image exists first
         try:
             docker_client.inspect_image('mozilla/ssh_scan')
         except docker.errors.APIError as ImageNotExistsError:
             docker_client.pull('mozilla/ssh_scan')
 
-        sshscan_cmd = '/app/bin/ssh_scan -p ' + sshport + ' -t ' + target
-
         container = docker_client.create_container('mozilla/ssh_scan', sshscan_cmd, name='sshscan-container')
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
         sshscan_output = docker_client.logs(container.get('Id'))
         # This output, we should send it somewhere, for now logging to a file in the current directory
-        outfile = open(os.path.join(outpath, target + '__sshscan.json'), 'w+')
+        outfile = open(os.path.join(outpath, domain_or_IP + '__sshscan.json'), 'w+')
         outfile.write(str(sshscan_output))
         return True
 
     # Here only testing if it may have been installed as a Ruby gem
     elif (is_sshscan_installed()):
         tool_path = find_executable('ssh_scan')
-        sshscan_out_handler = open(target + "__ssh_scan.json", "w+")
+        sshscan_out_handler = open(domain_or_IP + "__ssh_scan.json", "w+")
         proc = subprocess.call([tool_path, "-p", sshport, "-t", target],
                         shell=False, stdout=sshscan_out_handler, stderr=subprocess.DEVNULL)
         return proc
@@ -378,6 +380,7 @@ def perform_sshscan_scan(target, outpath, ssh_port=22):
 def perform_nessus_scan(target, outpath):
 
     logger.info("[+] Attempting to run Nessus scan on the target...")
+    domain = urlparse(target[0]).netloc
     # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
     try:
         # According to documentation TenableIO client can be initialised
@@ -394,10 +397,10 @@ def perform_nessus_scan(target, outpath):
         nessus_scan.launch().wait_or_cancel_after(60)
         # Downloading the results in .nessus format
         # We will likely need to post this to somewhere else too
-        nessus_scan.download(os.path.join(outpath, target[0] + '.nessus'), nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
+        nessus_scan.download(os.path.join(outpath, domain + '.nessus'), nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
     except TenableIOApiException as TIOException:
-        logger.warning("[!] Nessus scan could not run. Make sure you have\
-         provided API keys to communicate with Tenable.io.")
+        logger.warning("[!] Nessus scan could not run. Make sure you have "
+        "provided API keys to communicate with Tenable.io.")
         return False
 
     return True
@@ -413,8 +416,11 @@ def perform_httpobs_scan(target, outpath):
     domain = urlparse(target[0]).netloc
     try:
         httpobs_result = scan(domain)
+        # This output we should send it somewhere, for now logging to a file
+        httpobs_file = open(os.path.join(outpath, domain + '__httpobs_scan.json'), 'w+')
+        httpobs_file.write(str(httpobs_result))
+        # Printing to screen if verbose
         logger.debug("HTTP Observatory output: " + httpobs_result)
-        # TODO: Implement write to file here
         return True
     except Exception as httpobsError:
         tool_path = find_executable('observatory')
@@ -526,7 +532,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
     
         msfmodule = "auxiliary/scanner/http/dir_scanner"
         msfcommand = './msfconsole -x "use ' + msfmodule + '; set RHOSTS ' + domain +\
-         '; set RPORT 443; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto; run"'
+         '; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto; run"'
         
         # Check if image exists first
         try:
@@ -559,12 +565,12 @@ def perform_zap_scan(target, tool_arguments, outpath):
 
     if (is_docker_installed()):
         
-        if (tool_arguments['safe_scan']):
-            file_suffix = "__ZAP_baseline.json"
-            zap_command = "zap-baseline.py -t " + target[0] + " -J " + domain + file_suffix
-        else:
+        if (tool_arguments['full_scan']):
             file_suffix = "__ZAP_full.json"
             zap_command = "zap-full-scan.py -m 1 -T 5 -d -t " + target[0] + " -J " + domain + file_suffix
+        else:
+            file_suffix = "__ZAP_baseline.json"
+            zap_command = "zap-baseline.py -t " + target[0] + " -J " + domain + file_suffix
 
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
@@ -599,6 +605,7 @@ def perform_zap_scan(target, tool_arguments, outpath):
         # Printing to screen if verbose
         logger.debug("ZAP output: " + str(zap_logs))
         
+        # TODO: Change the logic here
         if "ERROR" in zap_logs.__str__():
             logger.error("[-] ERROR in ZAP scan.")
             return False
@@ -617,14 +624,14 @@ def sanitise_shell_command(command):
 
 def showScanSummary(task_dictionary):
     coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
-        fmt='%(levelname)s:\t %(message)s')
+        fmt='%(levelname)-10s %(message)s')
 
     print("\n====== SCAN SUMMARY ======")
     for task, status in task_dictionary.items():
         if status:
             logger.success("[\o/] " + task + " completed successfully!")
         else:
-            logger.error("[:(] " + task + " failed to run. Please investigate or run manually.")
+            logger.error("[ :(] " + task + " failed to run. Please investigate or run manually.")
     
     print("====== END OF SCAN ======\n")
 
@@ -632,7 +639,7 @@ def showScanSummary(task_dictionary):
 def main():
     
     # Tracking script arguments here, default values
-    args_dict = {'safe_scan': False, 'web_app_scan': False, 'compress_output': False,
+    args_dict = {'full_scan': False, 'web_app_scan': False, 'compress_output': False,
     'verbose_output': False, 'quiet_run': False, 'output_dir': ""}
 
     # Default wordlist
@@ -649,8 +656,8 @@ def main():
     # target is a positional argument, must be specifieds
     parser.add_argument('target', help='host(s) to scan - this could be an \
     IP address, FQDN or a hostname')
-    parser.add_argument('--safe-scan', action='store_true', help='use this \
-    flag on production targets', default=False)
+    parser.add_argument('--full-scan', action='store_true', help='use this \
+    flag on non-production targets (currently only affects ZAP scan options)', default=False)
     parser.add_argument('--web-scan', action='store_true', help='perform a web app \
     scan additionally (ZAP and directory brute-forcing)', default=False)
     parser.add_argument('-x',
@@ -662,7 +669,6 @@ def main():
     help='specify output directory to store all tool output - default is /tmp')
 
     args = parser.parse_args()
-    print(args)
 
     # Target validation happens here. Target_OK here is a tuple.
     # First index is either a boolean False, or a string of IP
@@ -678,17 +684,18 @@ def main():
         # Running UDP first as it would prompt for sudo, the rest of the script should be 
         # non-interactive
 
-        # tasklist = ['udp-port-scan', 'tcp-port-scan', 'nessus-scan']
-        task_dict = {'udp-port-scan': True, 'tcp-port-scan': True, 'nessus-scan': True\
-        ,'ssh-scan': True, 'httpobs-scan': True, 'tlsobs-scan': True, 'zap-scan': True\
-        ,'dir-scan': True}
+        task_dict = {'udp-port-scan': True, 'tcp-port-scan': True, 'nessus-scan': True,\
+        'ssh-scan': True}
 
-        if args.safe_scan:
-            args_dict['safe_scan'] = True
+        if args.full_scan:
+            args_dict['full_scan'] = True
 
         if args.web_scan or target_OK[1] == 'URL':
             args_dict['web_app_scan'] = True
-            # tasklist.append('webapp-scan')
+            task_dict.update({'httpobs-scan': True})
+            task_dict.update({'tlsobs-scan': True})
+            task_dict.update({'zap-scan': True})
+            task_dict.update({'dir-scan': True})
 
         if args.outputdir:
             args_dict['output_dir'] = args.outputdir
@@ -726,7 +733,7 @@ def main():
 
                             if nmap_tcp_results[target_ip].has_tcp(22):
                                 ssh_found = True
-                                if not (perform_sshscan_scan(target_ip, output_path, 22)):
+                                if not (perform_sshscan_scan(target_OK, output_path, 22)):
                                     task_dict['ssh-scan']=False
                             else:
                                 # Need to find the actual SSH port, in case it is not 22
@@ -737,8 +744,9 @@ def main():
                                         if 'ssh' in map(str.lower, banner):
                                             ssh_found = True
                                             ssh_port = port
-                                            if not (perform_sshscan_scan(target_ip, output_path, ssh_port)):
+                                            if not (perform_sshscan_scan(target_OK, output_path, ssh_port)):
                                                 task_dict['ssh-scan']=False
+                                        
                             if (not ssh_found):
                                 logger.info("[+] SSH service not identified on \"" + target_OK[0] + "\", skipping SSH scan.")
 
@@ -750,7 +758,7 @@ def main():
                                     if nmap_tcp_results[ip].has_tcp(22):
                                         ssh_found = True
                                         if not (perform_sshscan_scan(ip, output_path, 22)):
-                                            task_dict['ssh-scan']=False
+                                            task_dict['ssh-scan']=False  
                                     else:
                                         # Need to find the actual SSH port, in case it's not 22
                                         for proto in nmap_tcp_results[ip].all_protocols():
@@ -769,7 +777,7 @@ def main():
                         # Something wrong with TCP port scan
                         task_dict[task]=False
                         logger.warning("[!] Unable to run TCP port scan. Make sure the target is reachable, or run the scan manually.")
-
+                
             if 'udp' in task:
                 # Run nmap UDP scan
                 nmap_udp_results = perform_nmap_udp_scan(target_OK, output_path)
@@ -778,29 +786,32 @@ def main():
                     logger.warning("[!] Unable to run UDP port scan. Make sure the target is reachable, or run the scan manually.")
             if 'nessus' in task:
                 # Run nessus scan
-                if not(perform_nessus_scan(target_OK, output_path)):
+                # if not(perform_nessus_scan(target_OK, output_path)):
                     logger.warning("[!] Unable to run Nessus scan. Make sure the target is reachable, or run the scan manually via Tenable.io console.")
                     task_dict[task]=False
-            if 'web' in task:
+            if 'httpobs' in task:
                 # Run HTTP Observatory scan
                 httpobs_scan_results = perform_httpobs_scan(target_OK, output_path)
                 if not httpobs_scan_results:
                     logger.warning("[!] Unable to run HTTP Observatory scan. Make sure the target is reachable, or run the scan manually.")
                     task_dict[task]=False
+            if 'tlsobs' in task:
                 # Run TLS Observatory scan
                 tlsobs_scan_results = perform_tlsobs_scan(target_OK, output_path)
                 if not tlsobs_scan_results:
                     logger.warning("[!] Unable to run TLS Observatory scan. Make sure the target is reachable, or run the scan manually.")
                     task_dict[task]=False
+            if 'zap' in task:
                 # Run ZAP scan(s)
                 zap_scan_results = perform_zap_scan(target_OK, args_dict, output_path)
                 if not zap_scan_results:
                     logger.warning("[!] Unable to run ZAP scan. Make sure the target is reachable, or run the scan manually.")
                     task_dict[task]=False
+            if 'dir' in task:
                 # Run dirb scan
                 directory_scan_results = perform_directory_bruteforce(target_OK, wordlist, output_path)
                 if not directory_scan_results:
-                    logger.warning("[!] Unable to run ZAP scan. Make sure the target is reachable, or run the scan manually.")
+                    logger.warning("[!] Unable to run directory brute-forcing. Make sure the target is reachable, or run the scan manually.")
                     task_dict[task]=False
         if args.x:
             args_dict['compress_output'] = True
