@@ -283,7 +283,7 @@ def perform_nmap_udp_scan(target, outpath):
 
     # Nmap UDP scans require sudo, check here if the user can sudo passwordless
     if (checkUserPrivilege()):
-        logger.notice("[+] NOTE: UDP scan requires sudo. You will be prompted for your local account password.")
+        logger.notice("[+] N: UDP scan requires sudo. You will be prompted for your local account password.")
         time.sleep(1)
     
     # Check to see if nmap is installed
@@ -394,10 +394,10 @@ def perform_nessus_scan(target, outpath):
         # in a number of ways. I choose here the environment variable option.
         # On the same tty, the user needs to set TENABLEIO_ACCESS_KEY and
         # TENABLEIO_SECRET_KEY variables. I prefer this over storing keys
-        # in a config file on disk
+        # in a config file on disk.
         client = TenableIOClient()
         
-        # Running basic network scan
+        # Run a basic network scan
         nessus_scan = client.scan_helper.create(name='Scan_for_ ' + target[0], text_targets=target[0], template='basic')
 
         # Let's allow up to 60 minutes for the scan to run and finish
@@ -818,7 +818,7 @@ def main():
                     logger.warning("[!] Unable to run UDP port scan. Make sure the target is reachable, or run the scan manually.")
             if 'nessus' in task:
                 # Run nessus scan
-                # if not(perform_nessus_scan(target_OK, output_path)):
+                if not(perform_nessus_scan(target_OK, output_path)):
                     logger.warning("[!] Unable to run Nessus scan. Make sure the target is reachable, or run the scan manually via Tenable.io console.")
                     task_dict[task]=False
             if 'httpobs' in task:
