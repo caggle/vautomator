@@ -29,7 +29,7 @@ verboselogs.install()
 logger = logging.getLogger(__name__)
 # Default logging level is INFO
 coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
-fmt='[%(hostname)s] %(asctime)s %(levelname)-8s %(message)s')
+fmt='[%(hostname)s] %(asctime)s %(levelname)8s %(message)s')
 
 
 def checkUserPrivilege():
@@ -60,7 +60,7 @@ def createOutputDirectory(target, output_dir):
     except OSError as exception:
         logger.warning("[!] Unable to create directory. Ensure a directory with "
          "the same name does not already exist. Tool output will be saved in the "
-         "current directory")
+         "current directory.")
         
         return False
 
@@ -261,6 +261,7 @@ def perform_nmap_tcp_scan(target, outpath):
         nmap_arguments = '-v -Pn -sT -sV --top-ports 1000 --open -T4 --system-dns'
         
         results = nm.scan(domain, arguments=nmap_arguments, sudo=False)
+        logger.debug("Running command: " + nm.command_line())
         if (target_ip == "".join(nm.all_hosts())):
             # This output we should send it somewhere, for now logging to a file
             nmap_tcp_file = open(os.path.join(outpath, domain + '__nmap_tcp.json'), 'w+')
@@ -282,7 +283,7 @@ def perform_nmap_udp_scan(target, outpath):
 
     # Nmap UDP scans require sudo, check here if the user can sudo passwordless
     if (checkUserPrivilege()):
-        logger.info("[+] Note: UDP scan requires sudo. You will be prompted for your local account password.")
+        logger.notice("[+] NOTE: UDP scan requires sudo. You will be prompted for your local account password.")
         time.sleep(1)
     
     # Check to see if nmap is installed
@@ -297,15 +298,16 @@ def perform_nmap_udp_scan(target, outpath):
         # Get target's resolved IP using system DNS
         target_ip = socket.gethostbyname(domain)
 
-        udp_ports = "17,19,53,67,68,123,137,138,139,\
-        161,162,500,520,646,1900,3784,3785,5353,27015,\
-        27016,27017,27018,27019,27020,27960"
+        udp_ports = "17,19,53,67,68,123,137,138,139,"\
+          "161,162,500,520,646,1900,3784,3785,5353,27015,"\
+          "27016,27017,27018,27019,27020,27960"
 
         nm = nmap.PortScanner()
         nmap_arguments = '-v -Pn -sU -sV --open -T4 --system-dns'
 
         # nmap UDP scan requires sudo, setting it to true
         results = nm.scan(domain, ports=udp_ports, arguments=nmap_arguments, sudo=True)
+        logger.debug("Running command: " + nm.command_line())
         if (target_ip == "".join(nm.all_hosts())):
             # This output we should send it somewhere, for now logging to a file
             nmap_udp_file = open(os.path.join(outpath, domain + '__nmap_udp.json'), 'w+')
@@ -333,6 +335,7 @@ def perform_sshscan_scan(target, outpath, ssh_port=22):
     if target[1] == 'URL':
         domain_or_IP = urlparse(target[0]).netloc
     sshscan_cmd = '/app/bin/ssh_scan -p ' + sshport + ' -t ' + domain_or_IP
+    logger.debug("Running command: " + sshscan_cmd)
 
     # Check if Docker is installed
     if (is_docker_installed()):
@@ -431,6 +434,7 @@ def perform_httpobs_scan(target, outpath):
         if (is_observatory_installed()):
             # We'd like to capture the tool output and save to a file
             httpobs_out_handler = open(os.path.join(outpath, domain + "__httpobs_scan.json"), "w+")
+            logger.debug("Running command: " + tool_path + " --format json -z --rescan " + domain)
             proc = subprocess.call([tool_path, "--format json", "-z", "--rescan", domain],
                             shell=False, stdout=httpobs_out_handler, stderr=subprocess.DEVNULL)
             # logger.debug("HTTP Observatory scan output: " + json.dumps(httpobs_out_handler, indent=2))
@@ -445,10 +449,11 @@ def perform_tlsobs_scan(target, outpath):
     logger.info("[+] Attempting to run TLS Observatory scan...")
 
     domain = urlparse(target[0]).netloc
-    tool_path = find_executable('tlsobs')
 
     if (is_TLSobservatory_installed()):
         # We'd like to capture the tool output and save to a file
+        tool_path = find_executable('tlsobs')
+        logger.debug("Running command: " + tool_path + " -r -raw " + domain)
         tlsobs_out_handler = open(os.path.join(outpath, domain + "__tlsobs_scan.json"), "w+")
         proc = subprocess.call([tool_path, "-r", "-raw", domain],
                         shell=False, stdout=tlsobs_out_handler, stderr=subprocess.DEVNULL)
@@ -475,6 +480,7 @@ def perform_tlsobs_scan(target, outpath):
         except docker.errors.APIError as ImageNotExistsError:
             docker_client.pull('mozilla/tls-observatory')
 
+        logger.debug("Running command: tlsobs -r -raw " + domain)
         container = docker_client.create_container('mozilla/tls-observatory', 'tlsobs -r -raw ' + domain)
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
@@ -511,6 +517,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         tool_path = find_executable('gobuster')
         # We'd like to capture the tool output and save to a file
         gobuster_out_handler = open(os.path.join(outpath, domain + "__gobuster_scan.txt"), "w+")
+        logger.debug("Running command: " + tool_path + " -u " + target[0] + " -w " + wordlist)
         proc = subprocess.call([tool_path, "-u " + target[0], "-w " + wordlist],
                         shell=False, stdout=gobuster_out_handler, stderr=subprocess.DEVNULL)
         # logger.debug("gobuster scan output: " + json.dumps(gobuster_out_handler, indent=2))
@@ -519,6 +526,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
     elif (is_dirb_installed()):
         tool_path = find_executable('dirb')
         dirb_out_handler = open(os.path.join(outpath, domain + "__dirb_scan.txt"), "w+")
+        logger.debug("Running command: " + tool_path + " " + target[0] + " " + wordlist + " -f -w -r -S")
         proc = subprocess.call([tool_path, target[0], wordlist, "-f", "-w", "-r", "-S"],
                         shell=False, stdout=dirb_out_handler, stderr=subprocess.DEVNULL)
         # logger.debug("dirb scan output: " + json.dumps(dirb_out_handler, indent=2))
@@ -540,12 +548,14 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         except docker.errors.APIError as ContainerNotExistsError:
             logger.notice("[*] No container with the same name already exists, nothing to remove.")
         
-        # TODO: This is broken, needs fixing (2 commands to run in the container)
         wget_command = 'wget https://raw.githubusercontent.com/v0re/dirb/master/wordlists/common.txt -P /tmp'
         msfmodule = "auxiliary/scanner/http/dir_scanner"
         msfcommand = './msfconsole -x "use ' + msfmodule + '; set RHOSTS ' + domain +\
          '; set SSL true; set THREADS 2; set VHOST ' + domain + '; set sslversion Auto'\
-         '; set RPORT 443; set DICTIONARY /tmp/common.txt; run; exit"'
+         '; set RPORT 443; set DICTIONARY /tmp/common.txt; set HttpClientTimeout 5; run; exit"'
+
+        combined_command = wget_command + " && " + msfcommand
+        logger.debug("Running command: " + msfcommand)
 
         # Check if image exists first
         try:
@@ -554,12 +564,10 @@ def perform_directory_bruteforce(target, wordlist, outpath):
             logger.notice("[*] Metasploit container image not found locally, downloading...")
             docker_client.pull('metasploitframework/metasploit-framework')
 
-        container = docker_client.create_container('metasploitframework/metasploit-framework', wget_command, name="msf-container")
+        container = docker_client.create_container('metasploitframework/metasploit-framework',\
+          command=['sh', '-c', combined_command], name="msf-container")
         docker_client.start(container)
-        exec_id = docker_client.exec_create(container.get('Id'), msfcommand, stdout=True)
-        output = docker_client.exec_start(exec_id, stream=True)
         docker_client.wait(container.get('Id'))
-        print(output)
         # Get the container logs anyway in case the tool did not run due to an error etc.
         msf_logs = docker_client.logs(container.get('Id'))
         # This output we should send it somewhere, for now logging to a file
@@ -567,6 +575,11 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         msf_file.write(msf_logs.decode('utf-8'))
         # Printing to screen if verbose
         logger.debug("Directory brute-force output:\n" + msf_logs.decode('utf-8'))
+
+        if ("exception" or "timeout") in msf_logs.__str__():
+            logger.error("[-] Error in MSF dir scan.")
+            return False
+        return True
         return True
         
     else:
@@ -605,15 +618,14 @@ def perform_zap_scan(target, tool_arguments, outpath):
             docker_client.inspect_image('owasp/zap2docker-weekly')
         except docker.errors.APIError as ImageNotExistsError:
             docker_client.pull('owasp/zap2docker-weekly')
-
+        
+        logger.debug("Running command: " + zap_command)
         # ZAP requires certain paths to be mounted if outputting to a file
         container = docker_client.create_container('owasp/zap2docker-weekly', zap_command, name="ZAP-container",
         volumes=['/zap/wrk'], host_config=docker_client.create_host_config(binds=[
         os.getcwd() + ':/zap/wrk/:rw']))
         docker_client.start(container)
         docker_client.wait(container.get('Id'))
-        # TODO: Need to get the output file here
-        # If the below works, then we don't need a -J option in zap_command above
 
         # Get the container logs anyway in case the tool did not run due to an error etc.
         zap_logs = docker_client.logs(container.get('Id'))
@@ -623,9 +635,8 @@ def perform_zap_scan(target, tool_arguments, outpath):
         # Printing to screen if verbose
         logger.debug("ZAP scan output:\n" + zap_logs.decode('utf-8'))
         
-        # TODO: Change the logic here
-        if "ERROR" in zap_logs.__str__():
-            logger.error("[-] ERROR in ZAP scan.")
+        if ("Exception" or "Traceback") in zap_logs.__str__():
+            logger.error("[-] Error in ZAP scan.")
             return False
         return True
 
@@ -643,7 +654,7 @@ def sanitise_shell_command(command):
 
 def showScanSummary(task_dictionary):
     coloredlogs.install(level='INFO', logger=logger, reconfigure=True,
-        fmt='%(levelname)-10s %(message)s')
+        fmt='%(levelname)-9s %(message)s')
 
     print("\n====== SCAN SUMMARY ======")
     for task, status in task_dictionary.items():
@@ -722,12 +733,14 @@ def main():
         if args.verbose:
             args_dict['verbose_output'] = True
             # In verbose mode we shall show messages starting from DEBUG severity
-            coloredlogs.install(level='DEBUG', logger=logger, reconfigure=True)
+            coloredlogs.install(level='DEBUG', logger=logger, reconfigure=True,
+            fmt='[%(hostname)s] %(asctime)s %(levelname)8s %(message)s')
 
         if args.quiet:
             args_dict['quiet_run'] = True
             # In quiet mode we shall only show ERROR or more severe
-            coloredlogs.install(level='ERROR', logger=logger, reconfigure=True)
+            coloredlogs.install(level='ERROR', logger=logger, reconfigure=True,
+            fmt='[%(hostname)s] %(asctime)s %(levelname)8s %(message)s')
 
         output_path = createOutputDirectory(target_OK, args_dict)
         if not output_path:
