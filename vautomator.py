@@ -283,7 +283,7 @@ def perform_nmap_udp_scan(target, outpath):
 
     # Nmap UDP scans require sudo, check here if the user can sudo passwordless
     if (checkUserPrivilege()):
-        logger.notice("[+] N: UDP scan requires sudo. You will be prompted for your local account password.")
+        logger.notice("[+] Note: UDP scan requires sudo. You will be prompted for your local account password.")
         time.sleep(1)
     
     # Check to see if nmap is installed
@@ -400,8 +400,8 @@ def perform_nessus_scan(target, outpath):
         # Run a basic network scan
         nessus_scan = client.scan_helper.create(name='Scan_for_ ' + target[0], text_targets=target[0], template='basic')
 
-        # Let's allow up to 60 minutes for the scan to run and finish
-        nessus_scan.launch().wait_or_cancel_after(60)
+        # Let's allow up to 45 minutes for the scan to run and finish
+        nessus_scan.launch().wait_or_cancel_after(45)
         # Downloading the results in .nessus format
         # We will likely need to post this to somewhere else too
         nessus_scan.download(os.path.join(outpath, domain + '.nessus'), nessus_scan.histories()[0].history_id, format=ScanExportRequest.FORMAT_NESSUS)
@@ -466,6 +466,7 @@ def perform_tlsobs_scan(target, outpath):
         try:
             docker_client = docker.APIClient(base_url='unix://var/run/docker.sock')
         except Exception as DockerNotRunningError:
+            print(DockerNotRunningError)
             logger.warning("[!] Docker is installed but not running. Skipping TLS Observatory scan.")
             return False
         # Clean up containers with the same name which may be leftovers
@@ -630,7 +631,7 @@ def perform_zap_scan(target, tool_arguments, outpath):
         # Get the container logs anyway in case the tool did not run due to an error etc.
         zap_logs = docker_client.logs(container.get('Id'))
         # This output we should send it somewhere, for now logging to a file
-        zap_file = open(domain + '__ZAP_logs.txt', 'w+')
+        zap_file = open(os.path.join(outpath, domain + '__ZAP_logs.txt'), 'w+')
         zap_file.write(zap_logs.decode('utf-8'))
         # Printing to screen if verbose
         logger.debug("ZAP scan output:\n" + zap_logs.decode('utf-8'))
