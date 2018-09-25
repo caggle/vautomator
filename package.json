@@ -1,0 +1,7 @@
+{
+  "name": "vautomator",
+  "version": "0.0.1",
+  "description": "Serverless CRUD service exposing a REST HTTP interface",
+  "author": "Cag",
+  "license": "MIT"
+}
