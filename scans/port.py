@@ -1,5 +1,3 @@
-import socket
-
 
 class Port:
     def __init__(self, port):

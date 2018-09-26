@@ -1,17 +1,20 @@
 import socket
 import sys
-from scans import Task
+import logging
+from scans import NessusTask, MozillaHTTPObservatoryTask
+from scans import MozillaTLSObservatoryTask, SSHScanTask, Port
 
 
 class Target:
     # TODO: Change this class
-    
-    def __init__(self, target):
+
+    def __init__(self, target, port):
         self.target = target
+        self.port = Port(port)
 
     def valid_ip(self):
         try:
-            ipaddress.ip_address(self.target)
+            socket.ipaddress.ip_address(self.target)
             return True
         except:
             return False
@@ -48,3 +51,20 @@ class Target:
             return True
         
         return False
+
+    def addTask(self, new_task):
+        if isinstance(new_task, NessusTask):
+            nessus_result = NessusTask.runNessusScan(self.target)
+            return nessus_result
+        elif isinstance(new_task, MozillaHTTPObservatoryTask):
+            httpobs_result = MozillaHTTPObservatoryTask.runHTTPObsScan(self.target)
+            return httpobs_result
+        elif isinstance(new_task, MozillaTLSObservatoryTask):
+            tlsobs_result = MozillaTLSObservatoryTask.runTLSObsScan(self.target)
+            return tlsobs_result
+        elif isinstance(new_task, SSHScanTask):
+            sshscan_result = SSHScanTask.runSSHScan(self.target)
+            return sshscan_result
+        else:
+            logging.error("No or unidentified task specified!")
+            return False

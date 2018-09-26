@@ -3,6 +3,7 @@ import os
 import requests
 import json
 import time
+import logging
 from scans import utils
 from tenable_io.api.scans import ScanExportRequest
 from tenable_io.client import TenableIOClient
@@ -16,10 +17,6 @@ class Task:
     def __init__(self, target):
         self.target = target
 
-    def run(self,):
-        # DO stuff
-        return
-
 
 class PortScanTask(Task):
     def __init__(self, target):
@@ -27,6 +24,9 @@ class PortScanTask(Task):
 
     # Not sure how these would work, as python-nmap still depends
     # on nmap as the executable to be present locally
+    # We won't be able to run this as a lambda function, 
+    # the client will have to.
+    # Leaving here for completeness for now
 
     def runTCPPortScan(self):
 
@@ -58,7 +58,7 @@ class NessusTask(Task):
     def __init__(self, target):
         super().__init__(self, target)
 
-    def runNessusScan():
+    def runNessusScan(self):
 
         # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
         try:
@@ -73,23 +73,23 @@ class NessusTask(Task):
             nessus_scan = client.scan_helper.create(name='Scan_for_ ' + self.target, text_targets=self.target, template='basic')
 
             # Let's allow up to 30 minutes for the scan to run and finish, otherwise cancel
+            # TODO: We don't want this blocking, will need to change
             starttime = time()
             nessus_scan.launch().wait_or_cancel_after(30)
             assert time() - starttime >= 30
 
-            # We need to return the results here
+            # TODO: We need to return the results here
             return client.scan_helper.id(nessus_scan.id)
 
         except TenableIOApiException as TIOException:
-            # return False
-            return TIOException
-
-        return True
+            logging.error("Tenable.io scan failed:" + TIOException)
+            return False
 
 
 class ZAPScanTask(Task):
 
     # Not sure if this is feasible with serverless as it relies on a Docker image
+    # We won't be able to run this as a lambda function, the client will have to.
     # Leaving here for completeness for now
     def __init__(self, target):
         super().__init__(self, target)
@@ -100,15 +100,15 @@ class MozillaHTTPObservatoryTask(Task):
     def __init__(self, target):
         super().__init__(self, target)
 
-    def runHTTPObsScan():
+    def runHTTPObsScan(self):
 
         try:
             httpobs_result = scan(self.target)
             return httpobs_result
 
         except Exception as httpobsError:
-            # return False
-            return httpobsError
+            logging.error("HTTP Observatory scan failed:" + httpobsError)
+            return False
 
 
 class MozillaTLSObservatoryTask(Task):
@@ -116,7 +116,7 @@ class MozillaTLSObservatoryTask(Task):
     def __init__(self, target):
         super().__init__(self, target)
 
-    def runTLSObsScan():
+    def runTLSObsScan(self):
 
         # Will have to invoke the API manually here
         # Ref: https://github.com/mozilla/tls-observatory#api-endpoints
@@ -136,8 +136,8 @@ class MozillaTLSObservatoryTask(Task):
                 return False
 
         except Exception as TLSObsError:
-            # return False
-            return TLSObsError
+            logging.error("TLS Observatory scan failed:" + TLSObsError)
+            return False
 
 
 class SSHScanTask(Task):
@@ -157,7 +157,7 @@ class SSHScanTask(Task):
             sshscan_response = requests.post(sshscan_API_scan_URL, data=body)
 
             if (sshscan_response.status == '200'):
-                sshscan_uuid = json.loads(tlsobs_response.text)
+                sshscan_uuid = json.loads(sshscan_response.text)
                 # Wait for a little bit for the scan to finish
                 time.sleep(5)
                 sshscan_API_result_URL = "{0}/api/v1/scan/results?uuid={1}".format(sshscan_API_base, sshscan_uuid['uuid'])
@@ -167,13 +167,14 @@ class SSHScanTask(Task):
                 return False
 
         except Exception as SSHScanError:
-            # return False
-            return SSHScanError
+            logging.error("SSH scan failed:" + SSHScanError)
+            return False
 
 
 class DirBruteTask(Task):
 
     # Not sure if this is feasible with serverless as it relies on a Docker image or a binary being installed
-    # Leaving here for completeness for now
+    # We won't be able to run this as a lambda function, the client will have to.
+    # Leaving here for completeness for now.
     def __init__(self, target):
         super().__init__(self, target)
