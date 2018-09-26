@@ -27,8 +27,8 @@ functions:
           method: post
           cors: true
     environment: 
-      TENABLEIO_ACCESS_KEY: ''
-      TENABLEIO_SECRET_KEY: ''
+      TENABLEIO_ACCESS_KEY: '<TIO_ACCESS_KEY>'
+      TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
 
@@ -41,8 +41,8 @@ functions:
           method: get
           cors: true
     environment: 
-      TENABLEIO_ACCESS_KEY: ''
-      TENABLEIO_SECRET_KEY: ''
+      TENABLEIO_ACCESS_KEY: '<TIO_ACCESS_KEY>'
+      TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
 
@@ -54,8 +54,8 @@ functions:
           method: get
           cors: true
     environment: 
-      TENABLEIO_ACCESS_KEY: ''
-      TENABLEIO_SECRET_KEY: ''
+      TENABLEIO_ACCESS_KEY: '<TIO_ACCESS_KEY>'
+      TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
 

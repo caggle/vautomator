@@ -3,17 +3,28 @@ import logging
 import os
 import time
 import uuid
-
 import boto3
+from scans import Target, Task, Response, Port
+
 dynamodb = boto3.resource('dynamodb')
 
 
 def create(event, context):
     data = json.loads(event['body'])
-    if 'text' not in data:
-        logging.error("Validation Failed")
-        raise Exception("Couldn't create the todo item.")
-        return
+    if not Target(data.get('target')).valid():
+        logging.error("Target Validation Failed of: " +
+                      json.dumps(data))
+        return Response({
+            "statusCode": 200,
+            "body": json.dumps({'error': 'target was not valid or missing'})
+        }).with_security_headers()
+
+    if not Port(data.get('port')).valid():
+        logging.error("Port Validation Failed of: " + json.dumps(data))
+        return Response({
+            "statusCode": 200,
+            "body": json.dumps({'error': 'port was not valid or missing'})
+        }).with_security_headers()
 
     timestamp = int(time.time() * 1000)
 
@@ -21,8 +32,8 @@ def create(event, context):
 
     item = {
         'id': str(uuid.uuid1()),
-        'text': data['text'],
-        'checked': False,
+        'target': data['target'],
+        'port': data['port'],
         'createdAt': timestamp,
         'updatedAt': timestamp,
     }
@@ -31,9 +42,8 @@ def create(event, context):
     table.put_item(Item=item)
 
     # create a response
-    response = {
+    return Response({
         "statusCode": 200,
         "body": json.dumps(item)
-    }
-
-    return response
+    }).with_security_headers()
+    

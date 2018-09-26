@@ -1,8 +1,8 @@
 import json
 import os
-
-from todos import decimalencoder
 import boto3
+from scans import decimalencoder, Response
+
 dynamodb = boto3.resource('dynamodb')
 
 
