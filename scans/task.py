@@ -4,11 +4,14 @@ import requests
 import json
 import time
 import logging
+from scan import decimalencoder
 from scans import utils
 from tenable_io.api.scans import ScanExportRequest
 from tenable_io.client import TenableIOClient
 from tenable_io.exceptions import TenableIOApiException
 from httpobs.scanner.local import scan
+import boto3
+dynamodb = boto3.resource('dynamodb')
 
 
 class Task:
@@ -16,6 +19,62 @@ class Task:
     # One task will have one target at a time
     def __init__(self, target):
         self.target = target
+
+    def updateStatus(self):
+
+        timestamp = int(time.time() * 1000)
+        table = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
+
+        if isinstance(self, NessusTask):
+            db_ExpressionAttributeNames = {
+                '#nessus_status': 'NessusTask'
+            }
+            db_ExpressionAttributeValues = {
+                ':NessusTask': 'true',
+                ':updatedAt': timestamp,
+            }
+            db_UpdateExpression = 'SET #nessus_status = :NessusTask, updatedAt = :updatedAt'
+        elif isinstance(self, MozillaHTTPObservatoryTask):
+            db_ExpressionAttributeNames = {
+                '#httpobs_status': 'HTTPObsTask'
+            }
+            db_ExpressionAttributeValues = {
+                ':HTTPObsTask': 'true',
+                ':updatedAt': timestamp,
+            }
+            db_UpdateExpression = 'SET #httpobs_status = :HTTPObsTask, updatedAt = :updatedAt'
+        elif isinstance(self, MozillaTLSObservatoryTask):
+            db_ExpressionAttributeNames = {
+                '#tlsobs_status': 'TLSObsTask'
+            }
+            db_ExpressionAttributeValues = {
+                ':TLSObsTask': 'true',
+                ':updatedAt': timestamp,
+            }
+            db_UpdateExpression = 'SET #tlsobs_status = :TLSObsTask, updatedAt = :updatedAt'
+        elif isinstance(self, SSHScanTask):
+            db_ExpressionAttributeNames = {
+                '#sshscan_status': 'SSHScanTask'
+            }
+            db_ExpressionAttributeValues = {
+                ':SSHScanTask': 'true',
+                ':updatedAt': timestamp,
+            }
+            db_UpdateExpression = 'SET #sshscan_status = :SSHScanTask, updatedAt = :updatedAt'
+        else:
+            logging.error("Unknown or undefined task.")
+            return False
+
+        # update the task status in the database
+        table.update_item(
+            Key={
+                'id': self.target.id
+            },
+            ExpressionAttributeNames=db_ExpressionAttributeNames,
+            ExpressionAttributeValues=db_ExpressionAttributeValues,
+            UpdateExpression=db_UpdateExpression
+        )
+        return True
 
 
 class PortScanTask(Task):
@@ -85,6 +144,9 @@ class NessusTask(Task):
             logging.error("Tenable.io scan failed:" + TIOException)
             return False
 
+    def update(self):
+        super().updateStatus(self)
+
 
 class ZAPScanTask(Task):
 
@@ -109,6 +171,9 @@ class MozillaHTTPObservatoryTask(Task):
         except Exception as httpobsError:
             logging.error("HTTP Observatory scan failed:" + httpobsError)
             return False
+
+    def update(self):
+        super().updateStatus(self)
 
 
 class MozillaTLSObservatoryTask(Task):
@@ -138,6 +203,9 @@ class MozillaTLSObservatoryTask(Task):
         except Exception as TLSObsError:
             logging.error("TLS Observatory scan failed:" + TLSObsError)
             return False
+
+    def update(self):
+        super().updateStatus(self)
 
 
 class SSHScanTask(Task):
@@ -170,6 +238,9 @@ class SSHScanTask(Task):
             logging.error("SSH scan failed:" + SSHScanError)
             return False
 
+    def update(self):
+        super().updateStatus(self)
+
 
 class DirBruteTask(Task):
 
@@ -178,3 +249,4 @@ class DirBruteTask(Task):
     # Leaving here for completeness for now.
     def __init__(self, target):
         super().__init__(self, target)
+

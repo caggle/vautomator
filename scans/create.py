@@ -29,7 +29,6 @@ def create(event, context):
         }).with_security_headers()
 
     timestamp = int(time.time() * 1000)
-
     table = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
 
     item = {
@@ -51,7 +50,11 @@ def create(event, context):
     # write the item to the database
     table.put_item(Item=item)
 
-    setupScan(data.get('target'), data.get('port'))
+    scan_target = Target(data.get('target'), data.get('port'), item['id'])
+
+    scan_with_tasks = setupScan(scan_target)
+    runScan(scan_with_tasks)
+
 
     # create a response
     return Response({
@@ -60,11 +63,16 @@ def create(event, context):
     }).with_security_headers()
 
 
-def setupScan(target, port):
-    scanTarget = Target(target, port)
-    scanTarget.addTask(MozillaHTTPObservatoryTask(target, port))
-    scanTarget.addTask(MozillaTLSObservatoryTask(target, port))
-    scanTarget.addTask(SSHScanTask(target, port))
-    scanTarget.addTask(NessusTask(target, port))
+def setupScan(target):
+    
+    target.addTask(MozillaHTTPObservatoryTask(target))
+    target.addTask(MozillaTLSObservatoryTask(target))
+    target.addTask(SSHScanTask(target))
+    target.addTask(NessusTask(target))
 
-    return True
+    return target
+
+
+def runScan(target_with_tasks):
+    result = target_with_tasks.runTasks()
+    return result

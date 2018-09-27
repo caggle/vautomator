@@ -8,9 +8,11 @@ from scans import MozillaTLSObservatoryTask, SSHScanTask, Port
 class Target:
     # TODO: Change this class
 
-    def __init__(self, target, port):
+    def __init__(self, target, port, scanID):
         self.target = target
         self.port = Port(port)
+        self.id =  scanID
+        self.tasklist = []
 
     def valid_ip(self):
         try:
@@ -53,18 +55,33 @@ class Target:
         return False
 
     def addTask(self, new_task):
-        if isinstance(new_task, NessusTask):
-            nessus_result = NessusTask.runNessusScan(self.target)
-            return nessus_result
-        elif isinstance(new_task, MozillaHTTPObservatoryTask):
-            httpobs_result = MozillaHTTPObservatoryTask.runHTTPObsScan(self.target)
-            return httpobs_result
-        elif isinstance(new_task, MozillaTLSObservatoryTask):
-            tlsobs_result = MozillaTLSObservatoryTask.runTLSObsScan(self.target)
-            return tlsobs_result
-        elif isinstance(new_task, SSHScanTask):
-            sshscan_result = SSHScanTask.runSSHScan(self.target)
-            return sshscan_result
-        else:
-            logging.error("No or unidentified task specified!")
-            return False
+        self.tasklist.append(new_task)
+
+    def runTasks(self):
+
+        for task in self.tasklist:
+            if isinstance(task, NessusTask):
+                nessus_result = task.runNessusScan(self.target)
+                if nessus_result:
+                    task.update()
+    
+            elif isinstance(task, MozillaHTTPObservatoryTask):
+                httpobs_result = task.runHTTPObsScan(self.target)
+                if httpobs_result:
+                    task.update()
+                
+            elif isinstance(task, MozillaTLSObservatoryTask):
+                tlsobs_result = task.runTLSObsScan(self.target)
+                if tlsobs_result:
+                    task.update()
+                
+            elif isinstance(task, SSHScanTask):
+                sshscan_result = task.runSSHScan(self.target)
+                if sshscan_result:
+                    task.update()
+                
+            else:
+                logging.error("No or unidentified task specified!")
+                return False
+
+        return (nessus_result & httpobs_result & tlsobs_result & sshscan_result)
