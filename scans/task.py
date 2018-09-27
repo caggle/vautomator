@@ -17,8 +17,9 @@ dynamodb = boto3.resource('dynamodb')
 class Task:
     # One target will have at least one task
     # One task will have one target at a time
+    # self.tasktarget here is a Target object
     def __init__(self, target):
-        self.target = target
+        self.tasktarget = target
 
     def updateStatus(self):
 
@@ -68,7 +69,7 @@ class Task:
         # update the task status in the database
         table.update_item(
             Key={
-                'id': self.target.id
+                'id': self.tasktarget.id
             },
             ExpressionAttributeNames=db_ExpressionAttributeNames,
             ExpressionAttributeValues=db_ExpressionAttributeValues,
@@ -116,32 +117,42 @@ class NessusTask(Task):
 
     def __init__(self, target):
         super().__init__(self, target)
+        # According to documentation TenableIO client can be initialised
+        # in a number of ways. I choose here the environment variable option.
+        # The env variables are specified in serverless.yml
+        self.client = TenableIOClient(access_key=os.environ('TENABLEIO_ACCESS_KEY'), secret_key=os.environ('TENABLEIO_SECRET_KEY'))
 
     def runNessusScan(self):
 
-        # Reference file: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
+        # Reference: https://github.com/tenable/Tenable.io-SDK-for-Python/blob/master/examples/scans.py
         try:
-            # According to documentation TenableIO client can be initialised
-            # in a number of ways. I choose here the environment variable option.
-            # On the same tty, the user needs to set TENABLEIO_ACCESS_KEY and
-            # TENABLEIO_SECRET_KEY variables. I prefer this over storing keys
-            # in a config file on disk.
-            client = TenableIOClient(access_key=os.environ('TENABLEIO_ACCESS_KEY'), secret_key=os.environ('TENABLEIO_SECRET_KEY'))
-        
             # Run a basic network scan
-            nessus_scan = client.scan_helper.create(name='Scan_for_ ' + self.target, text_targets=self.target, template='basic')
+            nessus_scan = self.client.scan_helper.create(name='Scan_for_ ' + self.tasktarget.targetname, text_targets=self.tasktarget.targetname, template='basic')
 
-            # Let's allow up to 30 minutes for the scan to run and finish, otherwise cancel
-            # TODO: We don't want this blocking, will need to change
-            starttime = time()
-            nessus_scan.launch().wait_or_cancel_after(30)
-            assert time() - starttime >= 30
-
-            # TODO: We need to return the results here
-            return client.scan_helper.id(nessus_scan.id)
+            # We don't want this blocking, so don't wait
+            nessus_scan.launch(wait=False)
+            # We will need to use the scan id later to check for status
+            return nessus_scan
 
         except TenableIOApiException as TIOException:
             logging.error("Tenable.io scan failed:" + TIOException)
+            return False
+
+    def checkScanStatus(self, scan):
+        # Query Tenable API to check if the scan is finished
+        status = self.client.status(scan.id)
+        if status == scan.STATUS_COMPLETED:
+            return "COMPLETE"
+        elif status == scan.STATUS_ABORTED:
+            return "ABORTED"
+        elif status == scan.STATUS_INITIALIZING:
+            return "INITIALIZING"
+        elif status == scan.STATUS_PENDING:
+            return "PENDING"
+        elif status == scan.STATUS_RUNNING:
+            return "RUNNING"
+        else:
+            logging.error("Something is wrong with Tenable.io scan. Check the TIO console manually.")
             return False
 
     def update(self):
@@ -164,12 +175,25 @@ class MozillaHTTPObservatoryTask(Task):
 
     def runHTTPObsScan(self):
 
+        # Ref: https://github.com/mozilla/http-observatory/blob/master/httpobs/docs/api.md
         try:
-            httpobs_result = scan(self.target)
+            httpobs_result = scan(self.tasktarget.targetname)
             return httpobs_result
 
         except Exception as httpobsError:
             logging.error("HTTP Observatory scan failed:" + httpobsError)
+            return False
+
+    def checkScanStatus(self, httpobs_scan):
+        # Query HTTP Observatory API to check if the scan is finished
+        status = httpobs_scan['state']
+        if status == "FINISHED":
+            return "COMPLETE"
+        elif ((status == "FAILED") or (status == "PENDING") or (status == "RUNNING") or (status == "ABORTED")):
+            return status
+        else:
+            logging.error("Something is wrong with HTTP Observatory scan. ",
+                          "Check the scan manually at {0}/analyze/{1}".format(os.environ('HTTPOBS_URL'), self.tasktarget.targetname))
             return False
 
     def update(self):
@@ -187,21 +211,31 @@ class MozillaTLSObservatoryTask(Task):
         # Ref: https://github.com/mozilla/tls-observatory#api-endpoints
         try:
             tlsobs_API_base = os.environ('TLSOBS_API_URL')
-            tlsbobs_API_scan_URL = "{0}/api/v1/scan?target={1}&rescan=true".format(tlsobs_API_base, self.target)
+            tlsbobs_API_scan_URL = "{0}/api/v1/scan?target={1}&rescan=true".format(tlsobs_API_base, self.tasktarget.targetname)
             tlsobs_response = requests.post(tlsbobs_API_scan_URL, data='')
 
             if (tlsobs_response.status == '200'):
                 tlsobs_scanID = json.loads(tlsobs_response.text)
                 # Wait for a little bit for the scan to finish
                 time.sleep(10)
-                tlsbobs_API_result_URL = "{0}/api/v1/results?id={1}".format(tlsobs_API_base, tlsobs_scanID['id'])
+                tlsbobs_API_result_URL = "{0}/api/v1/results?id={1}".format(tlsobs_API_base, tlsobs_scanID['scan_id'])
                 response = requests.get(tlsbobs_API_result_URL)
-                return response.text
+                return response
             else:
                 return False
 
         except Exception as TLSObsError:
             logging.error("TLS Observatory scan failed:" + TLSObsError)
+            return False
+
+    def checkScanStatus(self, tlsobs_scan):
+        # Query TLS Observatory API to check if the scan is finished
+        status = tlsobs_scan.status
+        if status == "200":
+            return "COMPLETE"
+        else:
+            logging.error("Something is wrong with TLS Observatory scan. ",
+                          "Check the scan manually at {0}/analyze/{1}#tls".format(os.environ('HTTPOBS_URL'), self.tasktarget.targetname))
             return False
 
     def update(self):
@@ -216,12 +250,12 @@ class SSHScanTask(Task):
     # We will probably talk to ssh_scan_api here directly
     # Ref: https://github.com/mozilla/ssh_scan_api/blob/master/examples/client.py
 
-    def runSSHScan(port=22):
+    def runSSHScan(self, port=22):
 
         try:
             sshscan_API_base = os.environ('SSHSCAN_API_URL')
-            sshscan_API_scan_URL = "{0}/api/v1/scan?target={1}".format(sshscan_API_base, self.target)
-            body = 'port={0}'.format(port)
+            sshscan_API_scan_URL = "{0}/api/v1/scan?target={1}".format(sshscan_API_base, self.tasktarget.targetname)
+            body = 'port={0}'.format(port.__str__())
             sshscan_response = requests.post(sshscan_API_scan_URL, data=body)
 
             if (sshscan_response.status == '200'):
@@ -236,6 +270,16 @@ class SSHScanTask(Task):
 
         except Exception as SSHScanError:
             logging.error("SSH scan failed:" + SSHScanError)
+            return False
+
+    def checkScanStatus(self, ssh_scan):
+        # Query TLS Observatory API to check if the scan is finished
+        ssh_scan_response = json.loads(ssh_scan)
+        if ssh_scan_response['status'] == "COMPLETED":
+            return "COMPLETE"
+        else:
+            logging.error("Something is wrong with ssh_scan scan. ",
+                          "Try running the scan manually.")
             return False
 
     def update(self):

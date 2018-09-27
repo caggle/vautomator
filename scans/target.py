@@ -6,24 +6,24 @@ from scans import MozillaTLSObservatoryTask, SSHScanTask, Port
 
 
 class Target:
-    # TODO: Change this class
 
-    def __init__(self, target, port, scanID):
-        self.target = target
+    # Here, tasklist is a list of Task objects
+    def __init__(self, target, port=80, scanID=''):
+        self.targetname = target
         self.port = Port(port)
-        self.id =  scanID
+        self.id = scanID
         self.tasklist = []
 
     def valid_ip(self):
         try:
-            socket.ipaddress.ip_address(self.target)
+            socket.ipaddress.ip_address(self.targetname)
             return True
         except:
             return False
 
     def valid_fqdn(self):
         try:
-            socket.gethostbyname(self.target)
+            socket.gethostbyname(self.targetname)
             return True
         except socket.error:
             return False
@@ -31,10 +31,10 @@ class Target:
     def valid(self):
         # Needed for Python2 unicode nuances
         if sys.version_info[0] < 3:
-            if not type(self.target) in [str, unicode]:
+            if not type(self.targetname) in [str, unicode]:
                 return False
         else:
-            if not isinstance(self.target, str):
+            if not isinstance(self.targetname, str):
                 return False
 
         starts_with_anti_patterns = [
@@ -46,7 +46,7 @@ class Target:
         ]
 
         for pattern in starts_with_anti_patterns:
-            if self.target.startswith(pattern):
+            if self.targetname.startswith(pattern):
                 return False
 
         if self.valid_ip() or self.valid_fqdn():
@@ -59,25 +59,28 @@ class Target:
 
     def runTasks(self):
 
+        # TODO: Change the flow of checking status 
         for task in self.tasklist:
             if isinstance(task, NessusTask):
                 nessus_result = task.runNessusScan(self.target)
-                if nessus_result:
+                if (nessus_result and task.checkScanStatus(nessus_result) == "COMPLETE"):
+                    # Need additional checks here to see if the scan is actually finished
+                    # Don't update without making sure it's finished
                     task.update()
     
             elif isinstance(task, MozillaHTTPObservatoryTask):
                 httpobs_result = task.runHTTPObsScan(self.target)
-                if httpobs_result:
+                if (httpobs_result and task.checkScanStatus(httpobs_result) == "COMPLETE"):
                     task.update()
                 
             elif isinstance(task, MozillaTLSObservatoryTask):
                 tlsobs_result = task.runTLSObsScan(self.target)
-                if tlsobs_result:
+                if (tlsobs_result and task.checkScanStatus(tlsobs_result) == "COMPLETE"):
                     task.update()
                 
             elif isinstance(task, SSHScanTask):
                 sshscan_result = task.runSSHScan(self.target)
-                if sshscan_result:
+                if (sshscan_result and task.checkScanStatus(sshscan_result) == "COMPLETE"):
                     task.update()
                 
             else:
@@ -85,3 +88,4 @@ class Target:
                 return False
 
         return (nessus_result & httpobs_result & tlsobs_result & sshscan_result)
+

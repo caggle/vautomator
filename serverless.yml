@@ -23,7 +23,7 @@ functions:
     handler: scans/create.create
     events:
       - http:
-          path: scans
+          path: vascans
           method: post
           cors: true
     environment: 
@@ -31,13 +31,14 @@ functions:
       TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
+      HTTPOBS_URL: 'https://observatory.mozilla.org'
 
 
   list:
     handler: scans/list.list
     events:
       - http:
-          path: scans
+          path: vascans
           method: get
           cors: true
     environment: 
@@ -45,19 +46,19 @@ functions:
       TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
+      HTTPOBS_URL: 'https://observatory.mozilla.org'
 
   get:
     handler: scans/get.get
     events:
       - http:
-          path: scans/{id}
+          path: vascans/{id}
           method: get
           cors: true
     environment: 
-      TENABLEIO_ACCESS_KEY: '<TIO_ACCESS_KEY>'
-      TENABLEIO_SECRET_KEY: '<TIO_SECRET_KEY>'
       TLSOBS_API_URL: 'https://tls-observatory.services.mozilla.com'
       SSHSCAN_API_URL: 'https://sshscan.rubidus.com'
+      HTTPOBS_URL: 'https://observatory.mozilla.org'
 
 #  update:
 #    handler: todos/update.update

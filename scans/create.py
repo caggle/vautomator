@@ -50,11 +50,11 @@ def create(event, context):
     # write the item to the database
     table.put_item(Item=item)
 
-    scan_target = Target(data.get('target'), data.get('port'), item['id'])
+    va_target = Target(data.get('target'), data.get('port'), item['id'])
+    # From here on va_target is a Target object
 
-    scan_with_tasks = setupScan(scan_target)
+    scan_with_tasks = setupScan(va_target)
     runScan(scan_with_tasks)
-
 
     # create a response
     return Response({

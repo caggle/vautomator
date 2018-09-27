@@ -12,7 +12,7 @@ def isToolAvailable(toolname):
                 status, output = subprocess.getstatusoutput(toolname)
                 if status == 0:
                     return True
-            except:
+            except BaseException:
                 return False
             return False
 
