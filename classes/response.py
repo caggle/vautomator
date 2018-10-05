@@ -18,6 +18,7 @@ class Response:
             "Pragma": "no-cache",
             "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; script-src 'none'; upgrade-insecure-requests",
             "Referrer-Policy": "no-referrer",
+            "Content-Type": "application/json",
             "X-Content-Type-Options": "nosniff",
             "X-Download-Options": "noopen",
             "X-Frame-Options": "DENY",
@@ -26,4 +27,4 @@ class Response:
             "Strict-Transport-Security": "max-age = 15768000; includeSubDomains"
         }
         return security_response_dict
-        
+     

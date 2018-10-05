@@ -1,3 +1,7 @@
 .serverless
 *.pyc
 *.pyo
+
+node_modules/
+
+test.json
