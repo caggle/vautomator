@@ -7,6 +7,7 @@ import boto3
 from classes import response, target, port, scheme
 from classes import task
 
+
 dynamodb = boto3.resource('dynamodb')
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -114,7 +115,7 @@ def setupScan(va_target):
 
     # target.addTask(task.MozillaHTTPObservatoryTask(target))
     va_target.addTask(task.MozillaTLSObservatoryTask(va_target))
-    # va_target.addTask(task.SSHScanTask(va_target))
+    va_target.addTask(task.SSHScanTask(va_target))
     # va_target.addTask(task.NessusTask(va_target))
     return va_target
 

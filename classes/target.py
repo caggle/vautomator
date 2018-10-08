@@ -1,8 +1,8 @@
 import socket
-import sys
 import logging
 from netaddr import valid_ipv4
 from classes import port, task
+
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)

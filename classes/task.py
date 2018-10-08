@@ -9,6 +9,7 @@ from tenable_io.client import TenableIOClient
 from tenable_io.exceptions import TenableIOApiException
 import boto3
 
+
 dynamodb = boto3.resource('dynamodb')
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -134,24 +135,27 @@ class MozillaTLSObservatoryTask(Task):
             logger.info(json.dumps({'error': tlsbobs_API_scan_URL}))
             tlsobs_req = requests.Request('POST', tlsbobs_API_scan_URL, data='')
             prepared = tlsobs_req.prepare()
-            pretty_printed_httpreq = '{}\n{}\n\n\n{}'.format(
-                                     prepared.method + ' ' + prepared.url,
-                                     '\n'.join('{}: {}'.format(k, v) for k, v in prepared.headers.items()),
-                                     prepared.body
-                                     )
+            # pretty_printed_httpreq = '{}\n{}\n\n\n{}'.format(
+            #                          prepared.method + ' ' + prepared.url,
+            #                          '\n'.join('{}: {}'.format(k, v) for k, v in prepared.headers.items()),
+            #                          prepared.body
+            #                          )
 
             # tlsobs_response = requests.post(tlsbobs_API_scan_URL, data='')
-            logger.info(json.dumps({'TLS Observatory raw request': pretty_printed_httpreq}))
+            # logger.info(json.dumps({'TLS Observatory raw request': pretty_printed_httpreq}))
             session = requests.Session()
             tlsobs_response = session.send(prepared)
 
             if (tlsobs_response.status_code == requests.codes.ok):
                 tlsobs_scanID = json.loads(tlsobs_response.text)
                 # Wait for a little bit for the scan to finish
-                time.sleep(10)
+                time.sleep(7)
                 tlsbobs_API_result_URL = "{0}/api/v1/results?id={1}".format(tlsobs_API_base, tlsobs_scanID['scan_id'])
                 response = requests.get(tlsbobs_API_result_URL)
-                return response.text
+                status = json.loads(response.text)
+                logger.info(json.dumps({'TLS Observatory result - completion status': status['completion_perc']}))
+                # Returning a JSON formatted response text, as it is a JSON response
+                return response.json()
             elif (tlsobs_response.status_code == 429):
                 tlsbobs_API_scan_URL = "{0}/api/v1/scan?target={1}".format(tlsobs_API_base, self.tasktarget.targetname)
                 tlsobs_req = requests.Request('POST', tlsbobs_API_scan_URL, data='')
@@ -163,6 +167,7 @@ class MozillaTLSObservatoryTask(Task):
                     tlsbobs_API_result_URL = "{0}/api/v1/results?id={1}".format(tlsobs_API_base, tlsobs_scanID['scan_id'])
                     response = requests.get(tlsbobs_API_result_URL)
                     return response.text
+                logger.info(json.dumps({'TLS Observatory result - completion status': response.text['completion_perc']}))
 
             else:
                 return False
@@ -173,8 +178,10 @@ class MozillaTLSObservatoryTask(Task):
 
     def checkScanStatus(self, tlsobs_scan):
         # Query TLS Observatory API to check if the scan is finished
-        status = tlsobs_scan.status
-        if status == "200":
+        # TODO: This needs to be re-worked
+
+        status = tlsobs_scan.status_code
+        if status == 200:
             return "COMPLETE"
         else:
             logger.error("Something is wrong with TLS Observatory scan. ",
@@ -197,17 +204,18 @@ class SSHScanTask(Task):
 
         try:
             sshscan_API_base = os.getenv('SSHSCAN_API_URL')
+            logger.info(json.dumps({'error': sshscan_API_base}))
             sshscan_API_scan_URL = "{0}/api/v1/scan?target={1}".format(sshscan_API_base, self.tasktarget.targetname)
             body = 'port={0}'.format(sshport.__str__())
             sshscan_response = requests.post(sshscan_API_scan_URL, data=body)
 
-            if (sshscan_response.status == '200'):
+            if (sshscan_response.status_code == requests.codes.ok):
                 sshscan_uuid = json.loads(sshscan_response.text)
                 # Wait for a little bit for the scan to finish
                 time.sleep(5)
                 sshscan_API_result_URL = "{0}/api/v1/scan/results?uuid={1}".format(sshscan_API_base, sshscan_uuid['uuid'])
                 response = requests.get(sshscan_API_result_URL)
-                return response.text
+                return response.json()
             else:
                 return False
 
@@ -216,7 +224,7 @@ class SSHScanTask(Task):
             return False
 
     def checkScanStatus(self, ssh_scan):
-        # Query TLS Observatory API to check if the scan is finished
+        # Query SSH scan API to check if the scan is finished
         ssh_scan_response = json.loads(ssh_scan)
         if ssh_scan_response['status'] == "COMPLETED":
             return "COMPLETE"
