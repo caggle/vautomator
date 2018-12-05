@@ -2,20 +2,24 @@
 import sys
 import os
 import time
+import logging
+from lib import target, port, scheme
+from lib import task
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # Get targeting info
-fqdn = sys.argv[1]
+destination = sys.argv[1]
 
-# Poor man's FQDN checking
-if not fqdn:
-  print("FQDN was not provided, please provide an FQDN (Example: foo.example.com)")
-  exit(1) 
+if not target.Target(destination).valid():
+    # Maybe we have a URL, or it is an invalid target
+    if not scheme.Scheme(destination).valid():
+        # Invalid target
+        logger.error("Invalid target, please use an FQDN or a URL.")
 
-if "http" in fqdn:
-  print("FQDN provided is not an FQDN, please use an FQDN (Example: foo.example.com)")
-  exit(1) 
-
-output_path = "/app/results/" + fqdn + "/"
+domain = urlparse(target[0]).netloc    
+output_path = "/app/results/" + destination + "/"
 
 # Create a location to store our outputs
 try:
