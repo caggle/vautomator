@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import logging
+from urllib.parse import urlparse
 from lib import target, port, scheme
 from lib import task
 
@@ -18,7 +19,7 @@ if not target.Target(destination).valid():
         # Invalid target
         logger.error("Invalid target, please use an FQDN or a URL.")
 
-domain = urlparse(target[0]).netloc    
+domain = urlparse(target[0]).netloc
 output_path = "/app/results/" + destination + "/"
 
 # Create a location to store our outputs
