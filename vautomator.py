@@ -478,7 +478,7 @@ def perform_tlsobs_scan(target, outpath):
         # Check if image exists first
         try:
             docker_client.inspect_image('mozilla/tls-observatory')
-        except docker.errors.APIError as ImageNotExistsError:
+        except docker.errors.ImageNotFound as ImageNotExistsError:
             docker_client.pull('mozilla/tls-observatory')
 
         logger.debug("Running command: tlsobs -r -raw " + domain)
@@ -561,7 +561,7 @@ def perform_directory_bruteforce(target, wordlist, outpath):
         # Check if image exists first
         try:
             docker_client.inspect_image('metasploitframework/metasploit-framework')
-        except docker.errors.APIError as ImageNotExistsError:
+        except docker.errors.ImageNotFound as ImageNotExistsError:
             logger.notice("[*] Metasploit container image not found locally, downloading...")
             docker_client.pull('metasploitframework/metasploit-framework')
 
@@ -617,7 +617,7 @@ def perform_zap_scan(target, tool_arguments, outpath):
         # Check if image exists first
         try:
             docker_client.inspect_image('owasp/zap2docker-weekly')
-        except docker.errors.APIError as ImageNotExistsError:
+        except docker.errors.ImageNotFound as ImageNotExistsError:
             docker_client.pull('owasp/zap2docker-weekly')
         
         logger.debug("Running command: " + zap_command)
