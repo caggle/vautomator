@@ -8,7 +8,8 @@ RUN mkdir -p /app/results
 RUN apt-get update && \
     apt-get install -y build-essential && \
     apt-get install -y make && \
-    apt-get install -y curl
+    apt-get install -y curl && \
+    apt-get install -y python3-pip
 
 # Install NMAP
 RUN apt-get install -y nmap
@@ -27,39 +28,29 @@ RUN cd /app/vendor/dirb222/ && \
 RUN gem install ssh_scan
 
 # Install ZAP
-RUN echo 'deb http://download.opensuse.org/repositories/home:/cabelo/Debian_9.0/ /' > /etc/apt/sources.list.d/home:cabelo.list
-RUN apt-get update
-RUN apt-get install owasp-zap
+RUN cd /tmp && \
+    wget 'https://download.opensuse.org/repositories/home:/cabelo/Debian_9.0/amd64/owasp-zap_2.7.0_amd64.deb' && \
+    dpkg -i /tmp/owasp-zap_2.7.0_amd64.deb && \
+    cd /
 
 # Install HTTP Observatory tool
-RUN apk --update add nodejs && \
-    rm -rf /var/cache/apk/* && \
+RUN apt-get install -y software-properties-common
+RUN curl -sL https://deb.nodesource.com/setup_11.x | bash -
+RUN apt-get install -y nodejs && \
     npm install -g observatory-cli
 
 # Install TLS Observatory tool
 # First build latest Go from master
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+RUN cd /tmp && \
+    wget https://dl.google.com/go/go1.11.2.linux-amd64.tar.gz && \
+    tar -C /app/vendor/ -xzf /tmp/go1.11.2.linux-amd64.tar.gz && \
+    cd /
 
-WORKDIR $GOPATH
+ENV GOPATH /app/vendor/go/bin
+ENV PATH $GOPATH:$PATH
 
-RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH" && \
-    git clone https://github.com/golang/go.git /tmp/go && \
-	cd /tmp/go/src && \
-	./make.bash && \
-	rm -rf /usr/local/go; \
-	mv /tmp/go /usr/local/; \
-	rm -rf /usr/local/go/.git*; \
-	rm -rf /tmp/*; \
-	go version && \
-
-# We have a working go installation, get tlsobs binary
-ENV GOPATH $HOME/go
-RUN mkdir $GOPATH
-ENV PATH $GOPATH/bin:$PATH
 RUN go get github.com/mozilla/tls-observatory/tlsobs
 
 # Copy over relevant files we need
-RUN pip3 install -r ./requirements.txt
-COPY ./run.py /app/run.py
-RUN chmod -x /app/run.py
+# COPY ./run.py /app/run.py
+# RUN chmod -x /app/run.py
