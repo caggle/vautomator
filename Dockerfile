@@ -23,14 +23,43 @@ RUN cd /app/vendor/dirb222/ && \
     make && \
     cd /
 
-# Copy over relevant files we need
-COPY ./run.py /app/run.py
-RUN chmod -x /app/run.py
-
 # Install ssh_scan
 RUN gem install ssh_scan
 
-# Install and compile Y
+# Install ZAP
+RUN echo 'deb http://download.opensuse.org/repositories/home:/cabelo/Debian_9.0/ /' > /etc/apt/sources.list.d/home:cabelo.list
+RUN apt-get update
+RUN apt-get install owasp-zap
 
+# Install HTTP Observatory tool
+RUN apk --update add nodejs && \
+    rm -rf /var/cache/apk/* && \
+    npm install -g observatory-cli
 
-# Install and compile Z
+# Install TLS Observatory tool
+# First build latest Go from master
+ENV GOPATH /go
+ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+
+WORKDIR $GOPATH
+
+RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH" && \
+    git clone https://github.com/golang/go.git /tmp/go && \
+	cd /tmp/go/src && \
+	./make.bash && \
+	rm -rf /usr/local/go; \
+	mv /tmp/go /usr/local/; \
+	rm -rf /usr/local/go/.git*; \
+	rm -rf /tmp/*; \
+	go version && \
+
+# We have a working go installation, get tlsobs binary
+ENV GOPATH $HOME/go
+RUN mkdir $GOPATH
+ENV PATH $GOPATH/bin:$PATH
+RUN go get github.com/mozilla/tls-observatory/tlsobs
+
+# Copy over relevant files we need
+RUN pip3 install -r ./requirements.txt
+COPY ./run.py /app/run.py
+RUN chmod -x /app/run.py

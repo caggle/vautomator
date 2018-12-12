@@ -1,0 +1,3 @@
+vautomator:
+  build: .
+  env_file: ./conf/api.env
