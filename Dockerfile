@@ -51,6 +51,7 @@ ENV PATH $GOPATH:$PATH
 
 RUN go get github.com/mozilla/tls-observatory/tlsobs
 
-# Copy over relevant files we need
-# COPY ./run.py /app/run.py
-# RUN chmod -x /app/run.py
+RUN cd /app && \
+    git clone https://github.com/caggle/vautomator.git -b dockerized_example
+RUN pip3 install -r /app/vautomator/requirements.txt
+RUN chmod +x /app/vautomator/run.py

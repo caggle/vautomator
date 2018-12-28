@@ -1,4 +1,6 @@
+#!/usr/bin/python3
 # A minimally viable automated work-flow of VA Automation that we can incrementally improve on...
+
 import sys
 import os
 import time
