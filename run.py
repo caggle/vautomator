@@ -16,15 +16,17 @@ logger.setLevel(logging.INFO)
 def main():
     # Get targeting info
     destination = sys.argv[1]
+    output_path = "/app/results/" + destination + "/"
+    print(target.Target(destination).valid())
 
     if not target.Target(destination).valid():
         # Maybe we have a URL, or it is an invalid target
-        output_path = "/app/results/" + destination + "/"
         if not scheme.Scheme(destination).valid():
             # Invalid target
             logger.error("Invalid target, please use an FQDN or a URL.")
             sys.exit(-1)
         else:
+            # We have a URL
             domain = urlparse(destination).netloc
             output_path = "/app/results/" + domain + "/"
 
@@ -55,7 +57,8 @@ def setupVA(va_target):
         # ZAP scans and directory brute scans are a go
         va_target.addTask(task.MozillaHTTPObservatoryTask(va_target))
         va_target.addTask(task.MozillaTLSObservatoryTask(va_target))
-        va_target.addTask(task.ZAPScanTask(va_target))
+        # TODO: ZAP scans do not work yet in Docker, needs more work
+        # va_target.addTask(task.ZAPScanTask(va_target))
         va_target.addTask(task.DirectoryBruteTask(va_target, tool="dirb"))
     
     return va_target

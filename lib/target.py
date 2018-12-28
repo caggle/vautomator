@@ -18,17 +18,13 @@ class Target:
         self.tasklist = []
 
     def valid_ip(self):
-        try:
-            valid_ipv4(self.targetname)
-            return True
-        except BaseException:
-            return False
+        return valid_ipv4(self.targetname)
 
     def valid_fqdn(self):
         try:
             socket.gethostbyname(self.targetname)
             return True
-        except socket.error:
+        except Exception:
             return False
 
     def valid(self):

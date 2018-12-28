@@ -8,7 +8,7 @@ class Scheme:
     def valid(self):
         try:
             scheme = urlparse(self.url).scheme
-            if scheme == '' or scheme == 'http' or scheme == 'https':
+            if scheme == 'http' or scheme == 'https':
                 return True
             else:
                 return False
