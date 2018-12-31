@@ -38,10 +38,11 @@ RUN gem install ssh_scan
 # Install ZAP, and files necessary for ZAP baseline scan
 # Installing the deb file may not be needed
 # TODO: ZAP still does not work, needs more work on it
-RUN cd /tmp && \
-    wget -nv 'https://download.opensuse.org/repositories/home:/cabelo/Debian_9.0/amd64/owasp-zap_2.7.0_amd64.deb' && \
-    dpkg -i /tmp/owasp-zap_2.7.0_amd64.deb && \
-    cd /
+# We probably don't need this installed
+# RUN cd /tmp && \
+#    wget -nv 'https://download.opensuse.org/repositories/home:/cabelo/Debian_9.0/amd64/owasp-zap_2.7.0_amd64.deb' && \
+#    dpkg -i /tmp/owasp-zap_2.7.0_amd64.deb && \
+#    cd /
 
 RUN gem install zapr
 RUN pip2 install --upgrade pip zapcli python-owasp-zap-v2.4

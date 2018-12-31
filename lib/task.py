@@ -139,7 +139,7 @@ class NmapTask(Task):
                 "61532,61900,62078,63331,64623,64680,65000,65129,65389")
             nmap_arguments = '-v -Pn -sTU -sV -p T:' + tcp_top1000_ports + ',U:' + udp_ports + ' --open -T4 --system-dns'
             isSudo = True
-            results = nm.scan(self.tasktarget.targetdomain, arguments=nmap_arguments, sudo=isSudo)
+            results = nm.scan(self.tasktarget.targetdomain, arguments=nmap_arguments, sudo=False)
             print(results)
 
         if results:
@@ -169,7 +169,7 @@ class NessusTask(Task):
         # Note no subprocess call is required here
         try:
             # Run a basic network scan on the target
-            nessus_scan = self.client.scan_helper.create(name='Scan_for_ ' + self.tasktarget.targetname, text_targets=self.tasktarget.targetname, template='basic')
+            nessus_scan = self.client.scan_helper.create(name='Scan_for_ ' + self.tasktarget.targetdomain, text_targets=self.tasktarget.targetdomain, template='basic')
 
             # We don't want this blocking, so don't wait
             nessus_scan.launch(wait=False)
