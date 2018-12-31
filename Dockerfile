@@ -73,8 +73,8 @@ RUN cd /tmp && \
     tar -C /app/vendor/ -xzf /tmp/go1.11.2.linux-amd64.tar.gz && \
     cd /
 
-ENV GOPATH /app/vendor/go/bin
-ENV PATH $GOPATH:$PATH
+ENV GOPATH /app/vendor/go
+ENV PATH $GOPATH/bin:$PATH
 
 RUN go get github.com/mozilla/tls-observatory/tlsobs
 RUN wget -nv http://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip && \

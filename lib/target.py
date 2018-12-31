@@ -1,11 +1,8 @@
 import socket
 import logging
 from netaddr import valid_ipv4
+from urllib.parse import urlparse
 from lib import port, task
-
-
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 
 class Target:
@@ -13,9 +10,18 @@ class Target:
     # Here, tasklist is a list of Task objects
     def __init__(self, target, default_port=80, scanID=''):
         self.targetname = target
+        self.targetdomain = ""
         self.port = port.Port(default_port)
         self.id = scanID
         self.tasklist = []
+
+    def isURL(self):
+        if not self.valid() and "http" in self.targetname:
+            self.targetdomain = urlparse(self.targetname).netloc
+            return True
+        else:
+            self.targetdomain = self.targetname
+            return False
 
     def valid_ip(self):
         return valid_ipv4(self.targetname)
@@ -53,25 +59,22 @@ class Target:
 
     def runTasks(self):
         
-        result_list = []
+        # result_list = []
+        result_dict = {'nmap': False, 'nessus': False, 'tlsobs': False, 'httpobs': False, 'sshscan': False, 'zapscan': False, 'dirbrute': False}
 
         for one_task in self.tasklist:
 
             if isinstance(one_task, task.NmapTask):
                 nmap_results = one_task.runNmapScan()
                 if nmap_results:
-                    logger.info("Nmap port scan(s) successfully ran.")
-                    result_list.append(nmap_results)
-                else:
-                    return False
+                    logging.info("Nmap port scan(s) successfully ran.")
+                    result_dict.update({'nmap': True})
 
             elif isinstance(one_task, task.NessusTask):
-                nessus_result = one_task.runNessusScan()
-                if (nessus_result):
-                    logger.info("Tenable.io scan successfully ran.")
-                    result_list.append(nessus_result)
-                else:
-                    return False
+                nessus_results = one_task.runNessusScan()
+                if (nessus_results):
+                    logging.info("Tenable.io scan successfully ran.")
+                    result_dict.update({'nessus': True})
 
                 # and one_task.checkScanStatus(nessus_result) == "COMPLETE"):
                 #     # Need additional checks here to see if the scan is actually finished
@@ -79,47 +82,39 @@ class Target:
                 #     one_task.update(nessus_result)
 
             elif isinstance(one_task, task.MozillaTLSObservatoryTask):
-                tlsobs_result = one_task.runTLSObsScan()
-                if (tlsobs_result):
-                    logger.info("TLS Observatory scan successfully ran.")
-                    result_list.append(tlsobs_result)
-                else:
-                    return False
+                tlsobs_results = one_task.runTLSObsScan()
+                if (tlsobs_results and tlsobs_results.returncode == 0):
+                    logging.info("TLS Observatory scan successfully ran.")
+                    result_dict.update({'tlsobs': True})
 
             elif isinstance(one_task, task.MozillaHTTPObservatoryTask):
-                httpobs_result = one_task.runHttpObsScan()
-                if (httpobs_result):
-                    logger.info("HTTP Observatory scan successfully ran.")
-                    result_list.append(httpobs_result)
-                else:
-                    return False
+                httpobs_results = one_task.runHttpObsScan()
+                # 0 is the returncode for successful execution
+                if (httpobs_results and httpobs_results.returncode == 0):
+                    logging.info("HTTP Observatory scan successfully ran.")
+                    result_dict.update({'httpobs': True})
+                    print(result_dict)
 
             elif isinstance(one_task, task.SSHScanTask):
-                sshscan_result = one_task.runSSHScan()
-                if (sshscan_result):
-                    logger.info("SSH scan successfully ran.")
-                    result_list.append(sshscan_result)
-                else:
-                    return False
+                sshscan_results = one_task.runSSHScan()
+                if (sshscan_results and sshscan_results.returncode == 0):
+                    logging.info("SSH scan successfully ran.")
+                    result_dict.update({'sshscan': True})
 
             elif isinstance(one_task, task.ZAPScanTask):
-                zapscan_result = one_task.runZAPScan()
-                if (zapscan_result):
-                    logger.info("ZAP scan successfully ran.")
-                    result_list.append(zapscan_result)
-                else:
-                    return False
+                zapscan_results = one_task.runZAPScan()
+                if (zapscan_results and zapscan_results.returncode == 0):
+                    logging.info("ZAP scan successfully ran.")
+                    result_dict.update({'zapscan': True})
 
             elif isinstance(one_task, task.DirectoryBruteTask):
-                dirbrute_result = one_task.runDirectoryBruteScan()
-                if (dirbrute_result):
-                    logger.info("Directory brute scan successfully ran.")
-                    result_list.append(dirbrute_result)
-                else:
-                    return False
+                dirbrute_results = one_task.runDirectoryBruteScan()
+                if (dirbrute_results and dirbrute_results.returncode == 0):
+                    logging.info("Directory brute scan successfully ran.")
+                    result_dict.update({'dirbrute': True})
 
             else:
-                logger.error("No or unidentified task specified")
+                logging.error("No or unidentified task specified")
                 return False
 
-        return result_list
+        return result_dict
