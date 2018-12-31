@@ -290,6 +290,7 @@ class DirectoryBruteTask(Task):
                 cmd = "/app/vendor/dirb222/dirb https://" + self.tasktarget.targetdomain \
                     + "/ /app/vendor/dirb222/wordlists/common.txt -o /app/results/" \
                     + self.tasktarget.targetdomain + "/https_dirb_common.txt"
+            print(cmd)
             dirbscan_cmd = utils.sanitise_shell_command(cmd)
             p = subprocess.Popen(dirbscan_cmd, stdout=subprocess.PIPE, shell=True)
             p.wait()

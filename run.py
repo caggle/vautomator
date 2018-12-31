@@ -16,7 +16,7 @@ def setupVA(va_target):
 
     # Need to make some logic here as to which tasks we should run
     # Port scans are always a go
-    # va_target.addTask(task.NmapTask(va_target))
+    va_target.addTask(task.NmapTask(va_target))
     # Nessus scan is also always a go
     va_target.addTask(task.NessusTask(va_target))
     print(va_target.targetname)
