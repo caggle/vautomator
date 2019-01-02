@@ -109,3 +109,4 @@ venv.bak/
 results/*
 
 # Config environment
+conf/api.env
