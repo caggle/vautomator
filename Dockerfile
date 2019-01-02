@@ -93,3 +93,6 @@ RUN cd /app && \
     git clone https://github.com/caggle/vautomator.git -b dockerized_example
 RUN pip3 install -r /app/vautomator/requirements.txt
 RUN chmod +x /app/vautomator/run.py
+
+# Clean-up
+RUN apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /myapp/
