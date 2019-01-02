@@ -5,4 +5,4 @@ services:
       context: .
       dockerfile: Dockerfile
     image: vautomator/latest
-    env_file: ./conf/api.env
+    env_file: ./conf/.env
