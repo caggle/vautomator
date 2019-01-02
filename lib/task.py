@@ -285,12 +285,11 @@ class DirectoryBruteTask(Task):
             if self.tasktarget.isURL():
                 cmd = "/app/vendor/dirb222/dirb " + self.tasktarget.targetname \
                     + "/ /app/vendor/dirb222/wordlists/common.txt -o /app/results/" \
-                    + self.tasktarget.targetdomain + "/https_dirb_common.txt"
+                    + self.tasktarget.targetdomain + "/https_dirb_common.txt -f"
             else:
                 cmd = "/app/vendor/dirb222/dirb https://" + self.tasktarget.targetdomain \
                     + "/ /app/vendor/dirb222/wordlists/common.txt -o /app/results/" \
-                    + self.tasktarget.targetdomain + "/https_dirb_common.txt"
-            print(cmd)
+                    + self.tasktarget.targetdomain + "/https_dirb_common.txt -f"
             dirbscan_cmd = utils.sanitise_shell_command(cmd)
             p = subprocess.Popen(dirbscan_cmd, stdout=subprocess.PIPE, shell=True)
             p.wait()

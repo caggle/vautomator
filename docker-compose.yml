@@ -1,3 +1,8 @@
-vautomator:
-  build: .
-  env_file: ./conf/api.env
+version: 3
+services:
+  vautomator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vautomator/latest
+    env_file: ./conf/api.env

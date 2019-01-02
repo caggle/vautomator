@@ -16,15 +16,15 @@ def setupVA(va_target):
 
     # Need to make some logic here as to which tasks we should run
     # Port scans are always a go
-    va_target.addTask(task.NmapTask(va_target))
+    # va_target.addTask(task.NmapTask(va_target))
     # Nessus scan is also always a go
     va_target.addTask(task.NessusTask(va_target))
     print(va_target.targetname)
     if va_target.isURL():
         # We have a URL, means HTTP Obs, TLS Obs,
         # ZAP scans and directory brute scans are a go
-        va_target.addTask(task.MozillaHTTPObservatoryTask(va_target))
-        va_target.addTask(task.MozillaTLSObservatoryTask(va_target))
+        # va_target.addTask(task.MozillaHTTPObservatoryTask(va_target))
+        # va_target.addTask(task.MozillaTLSObservatoryTask(va_target))
         # TODO: ZAP scans do not work yet in Docker, needs more work
         # va_target.addTask(task.ZAPScanTask(va_target))
         va_target.addTask(task.DirectoryBruteTask(va_target, tool="dirb"))
