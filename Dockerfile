@@ -90,9 +90,8 @@ RUN wget -nv http://s3-us-west-1.amazonaws.com/umbrella-static/top-1m.csv.zip &&
     dos2unix /etc/tls-observatory/cisco-top-1m.csv && dos2unix /etc/tls-observatory/alexa-top-1m.csv
 
 RUN cd /app && \
-    git clone https://github.com/caggle/vautomator.git -b dockerized_example && cd vautomator && \
-    git fetch && git rebase --onto origin/dockerized_example dockerized_example && \
-    git pull --force
+    git clone https://github.com/caggle/vautomator.git -b dockerized_example 
+RUN cd /app/vautomator && git fetch && git reset --hard origin/dockerized_example
 RUN pip3 install -r /app/vautomator/requirements.txt
 RUN chmod +x /app/vautomator/run.py
 
