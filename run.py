@@ -19,7 +19,7 @@ def setupVA(va_target):
     # va_target.addTask(task.NmapTask(va_target))
     # Nessus scan is also always a go
     va_target.addTask(task.NessusTask(va_target))
-    print(va_target.targetname)
+    # print(va_target.targetname)
     if va_target.isURL():
         # We have a URL, means HTTP Obs, TLS Obs,
         # ZAP scans and directory brute scans are a go
