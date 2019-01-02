@@ -108,5 +108,3 @@ venv.bak/
 # results files
 results/*
 
-# Config environment
-conf/.env
