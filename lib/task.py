@@ -162,6 +162,8 @@ class NessusTask(Task):
         # According to documentation TenableIO client can be initialised
         # in a number of ways. I choose here the environment variable option.
         self.client = TenableIOClient(access_key=os.getenv('TENABLEIO_ACCESS_KEY'), secret_key=os.getenv('TENABLEIO_SECRET_KEY'))
+        print(os.getenv('TENABLEIO_ACCESS_KEY'))
+        print(os.getenv('TENABLEIO_SECRET_KEY'))
 
     def runNessusScan(self):
 

@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: vautomator/latest
-    env_file: .env
     environment:
       - TENABLEIO_ACCESS_KEY=${TENABLEIO_ACCESS_KEY}
       - TENABLEIO_SECRET_KEY=${TENABLEIO_SECRET_KEY}
+
