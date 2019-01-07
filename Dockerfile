@@ -1,6 +1,13 @@
 FROM ruby:latest
 MAINTAINER Cag
 
+# This is to be able to talk to Tenable API
+ARG TENABLEIO_ACCESS_KEY
+ARG TENABLEIO_SECRET_KEY
+
+ENV TENABLEIO_ACCESS_KEY "$TENABLEIO_ACCESS_KEY"
+ENV TENABLEIO_SECRET_KEY "$TENABLEIO_SECRET_KEY"
+
 # Make a landing location for results
 RUN mkdir -p /app/results && \
     mkdir -p /app/vendor
